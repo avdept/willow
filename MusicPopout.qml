@@ -1,15 +1,18 @@
-// Music popout — album art, track meta, prev/play-pause/next controls.
+// Music popout — album art, track meta, progress bar, controls, audio visualizer.
+// Sections stack inside the Popout's Column (no fixed popupHeight).
 
 import QtQuick
+import QtQuick.Layouts
+import Quickshell.Io
 import Quickshell.Services.Mpris
 
 Popout {
     id: musicPopout
 
     popupWidth: 340
-    popupHeight: 115
+    contentSpacing: 10
+    contentPaddingBottom: 0    // visualizer sits flush with the popup's bottom edge
 
-    // Pick the most relevant player: prefer Playing, then Paused, then any with a title.
     readonly property var player: {
         const list = Mpris.players.values;
         for (let i = 0; i < list.length; i++)
@@ -24,15 +27,45 @@ Popout {
         return null;
     }
 
+    // Local position ticker — MPRIS pushes `position` infrequently, so we
+    // increment it locally every second and resync whenever the player
+    // actually pushes (seek, track change, sporadic update).
+    property real displayedPosition: 0
+
+    Timer {
+        interval: 1000
+        running: musicPopout.open && (musicPopout.player?.isPlaying ?? false)
+        repeat: true
+        onTriggered: musicPopout.displayedPosition += 1
+    }
+
+    Connections {
+        target: musicPopout.player
+        function onPositionChanged() {
+            if (musicPopout.player)
+                musicPopout.displayedPosition = musicPopout.player.position;
+        }
+        function onTrackTitleChanged() {
+            if (musicPopout.player)
+                musicPopout.displayedPosition = musicPopout.player.position;
+        }
+    }
+
+    Connections {
+        target: musicPopout
+        function onOpenChanged() {
+            if (musicPopout.open && musicPopout.player)
+                musicPopout.displayedPosition = musicPopout.player.position;
+        }
+    }
+
     // ── Top row: album art + track meta ──────────────────────────────────
     Row {
         id: topRow
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
+        width: parent.width
+        height: 60
         spacing: 12
 
-        // Album art (60×60). Falls back to a music-note glyph.
         Rectangle {
             id: artBox
             width: 60
@@ -58,7 +91,6 @@ Popout {
             }
         }
 
-        // Meta — title / artist / album, all elided
         Column {
             width: topRow.width - artBox.width - topRow.spacing
             anchors.verticalCenter: parent.verticalCenter
@@ -92,68 +124,205 @@ Popout {
         }
     }
 
-    // ── Controls: prev / play-pause / next, centered in the space below topRow
-    Row {
-        anchors.horizontalCenter: parent.horizontalCenter
-        // parent.verticalCenter is the middle of contentArea; offset by half
-        // of topRow.height so the Row centers in the space *below* topRow.
-        anchors.verticalCenter: parent.verticalCenter
-        anchors.verticalCenterOffset: topRow.height / 2 + 8
-        spacing: 14
+    // ── Progress: [elapsed]  [bar]  [total] ──────────────────────────────
+    RowLayout {
+        width: parent.width
+        spacing: 8
 
-        // Prev
-        MouseArea {
-            width: 28
-            height: 28
-            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-            enabled: musicPopout.player?.canGoPrevious ?? false
-            onClicked: musicPopout.player?.previous()
-
-            Text {
-                anchors.centerIn: parent
-                text: "󰒮"
-                color: musicPopout.fgColor
-                font.pixelSize: 18
-                opacity: parent.enabled ? 1.0 : 0.3
-            }
+        function fmtTime(s) {
+            if (!s || s < 0 || !isFinite(s))
+                return "0:00";
+            const total = Math.floor(s);
+            const m = Math.floor(total / 60);
+            const sec = total % 60;
+            return m + ":" + (sec < 10 ? "0" + sec : sec);
         }
 
-        // Play / Pause (filled circle)
+        Text {
+            text: parent.fmtTime(musicPopout.displayedPosition)
+            color: musicPopout.fgColor
+            opacity: 0.7
+            font.pixelSize: 11
+            Layout.alignment: Qt.AlignVCenter
+        }
+
         MouseArea {
-            width: 36
-            height: 36
+            id: progressArea
+            Layout.fillWidth: true
+            Layout.preferredHeight: 6
+            Layout.alignment: Qt.AlignVCenter
             cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-            enabled: musicPopout.player?.canTogglePlaying ?? false
-            onClicked: musicPopout.player?.togglePlaying()
+            enabled: musicPopout.player?.canSeek ?? false
+
+            onClicked: function (mouse) {
+                const p = musicPopout.player;
+                if (!p || !p.canSeek || !p.length || p.length <= 0)
+                    return;
+                const ratio = Math.max(0, Math.min(1, mouse.x / width));
+                const targetSec = ratio * p.length;
+                const offset = targetSec - p.position;
+                p.seek(offset);
+                musicPopout.displayedPosition = targetSec;
+            }
 
             Rectangle {
                 anchors.fill: parent
-                radius: width / 2
-                color: musicPopout.accentColor
-                opacity: parent.enabled ? 1.0 : 0.3
+                radius: height / 2
+                color: musicPopout.borderColor
+                opacity: 0.55
             }
-            Text {
-                anchors.centerIn: parent
-                text: musicPopout.player?.isPlaying ? "󰏤" : "󰐊"
-                color: musicPopout.bgColor
-                font.pixelSize: 16
+            Rectangle {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                radius: height / 2
+                color: musicPopout.fgColor
+                width: {
+                    const p = musicPopout.player;
+                    if (!p || !p.length || p.length <= 0)
+                        return 0;
+                    return parent.width * Math.max(0, Math.min(1, musicPopout.displayedPosition / p.length));
+                }
             }
         }
 
-        // Next
-        MouseArea {
-            width: 28
-            height: 28
-            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-            enabled: musicPopout.player?.canGoNext ?? false
-            onClicked: musicPopout.player?.next()
+        Text {
+            text: parent.fmtTime(musicPopout.player?.length ?? 0)
+            color: musicPopout.fgColor
+            opacity: 0.7
+            font.pixelSize: 11
+            Layout.alignment: Qt.AlignVCenter
+        }
+    }
 
-            Text {
-                anchors.centerIn: parent
-                text: "󰒭"
-                color: musicPopout.fgColor
-                font.pixelSize: 18
-                opacity: parent.enabled ? 1.0 : 0.3
+    // ── Controls ─────────────────────────────────────────────────────────
+    Item {
+        width: parent.width
+        height: 36
+
+        Row {
+            anchors.centerIn: parent
+            spacing: 14
+
+            MouseArea {
+                width: 28
+                height: 28
+                cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                enabled: musicPopout.player?.canGoPrevious ?? false
+                onClicked: musicPopout.player?.previous()
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "󰒮"
+                    color: musicPopout.fgColor
+                    font.pixelSize: 18
+                    opacity: parent.enabled ? 1.0 : 0.3
+                }
+            }
+
+            MouseArea {
+                width: 36
+                height: 36
+                cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                enabled: musicPopout.player?.canTogglePlaying ?? false
+                onClicked: musicPopout.player?.togglePlaying()
+
+                Rectangle {
+                    anchors.fill: parent
+                    radius: width / 2
+                    color: musicPopout.fgColor
+                    opacity: parent.enabled ? 1.0 : 0.3
+                }
+                Text {
+                    anchors.centerIn: parent
+                    text: musicPopout.player?.isPlaying ? "󰏤" : "󰐊"
+                    color: musicPopout.bgColor
+                    font.pixelSize: 16
+                }
+            }
+
+            MouseArea {
+                width: 28
+                height: 28
+                cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                enabled: musicPopout.player?.canGoNext ?? false
+                onClicked: musicPopout.player?.next()
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "󰒭"
+                    color: musicPopout.fgColor
+                    font.pixelSize: 18
+                    opacity: parent.enabled ? 1.0 : 0.3
+                }
+            }
+        }
+    }
+
+    // ── Audio visualizer (cava) ──────────────────────────────────────────
+    Item {
+        id: visualizerRow
+        width: parent.width
+        height: 22
+
+        property var values: []
+        readonly property int barCount: 32
+        readonly property real barWidth: (width - (barCount - 1) * 2) / barCount
+
+        Row {
+            anchors.fill: parent
+            spacing: 2
+
+            Repeater {
+                model: visualizerRow.barCount
+                delegate: Rectangle {
+                    id: bar
+                    required property int index
+                    readonly property real value: Math.min(1, (visualizerRow.values[index] ?? 0) / 100)
+
+                    width: visualizerRow.barWidth
+                    anchors.bottom: parent.bottom
+                    radius: 2
+                    height: Math.max(1, bar.value * visualizerRow.height)
+
+                    color: {
+                        const v = bar.value;
+                        const lo = musicPopout.accentColor;
+                        const hi = musicPopout.dangerColor;
+                        return Qt.rgba(lo.r * (1 - v) + hi.r * v, lo.g * (1 - v) + hi.g * v, lo.b * (1 - v) + hi.b * v, 1.0);
+                    }
+                    opacity: 0.25 + bar.value * 0.75
+
+                    Behavior on height {
+                        NumberAnimation {
+                            duration: 90
+                            easing.type: Easing.OutCubic
+                        }
+                    }
+                    Behavior on opacity {
+                        NumberAnimation {
+                            duration: 90
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── cava process: only runs while the popup is open ──────────────────
+    Process {
+        id: cavaProc
+        running: musicPopout.open
+        command: ["cava", "-p", "/home/avdept/.config/quickshell/cava.conf"]
+        stdout: SplitParser {
+            splitMarker: "\n"
+            onRead: function (line) {
+                const t = line.trim();
+                if (!t)
+                    return;
+                const arr = t.split(";").map(parseFloat).filter(n => !isNaN(n));
+                if (arr.length > 0)
+                    visualizerRow.values = arr;
             }
         }
     }

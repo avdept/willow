@@ -28,6 +28,18 @@ Scope {
         objects: [Pipewire.defaultAudioSink]
     }
 
+    // Spotlight-style launcher (single instance across all screens).
+    // Toggle via: qs ipc call launcher toggle
+    Launcher {
+        id: launcher
+        bgColor:     root.cBg
+        fgColor:     root.cFg
+        subFgColor:  root.cSubFg
+        accentColor: root.cAccent
+        borderColor: root.cBorder
+        fontFamily:  root.fontFamily
+    }
+
     Variants {
         model: Quickshell.screens
 
@@ -53,6 +65,7 @@ Scope {
                 borderColor: root.cBorder
                 fgColor: root.cFg
                 accentColor: root.cAccent
+                dangerColor: root.cDanger
             }
 
             // ───── LEFT: omarchy logo + workspaces ─────
@@ -195,8 +208,6 @@ Scope {
                             if (!p)
                                 return "";
                             const status = p.playbackState === MprisPlaybackState.Playing ? "▶" : p.playbackState === MprisPlaybackState.Paused ? "⏸" : "⏹";
-                            const idLower = (p.identity || "").toLowerCase();
-
                             const artist = p.trackArtist || "";
                             const title = p.trackTitle || "";
                             const meta = artist ? artist + " - " + title : title;
@@ -295,6 +306,10 @@ Scope {
                         updateTrig.command = ["omarchy-launch-floating-terminal-with-presentation", "omarchy-update"];
                         if (!updateTrig.running)
                             updateTrig.running = true;
+                        // Recheck every 30s for 5 min after click so the icon
+                        // disappears soon after the user finishes updating.
+                        updateRecheckTimer.attemptsLeft = 10;
+                        updateRecheckTimer.restart();
                     }
 
                     Text {
@@ -305,13 +320,28 @@ Scope {
                         text: ""
                     }
 
+                    // Slow background poll — 10 min (waybar's 6h relied on signal-driven refresh, which qs can't catch).
                     Timer {
-                        interval: 21600000
+                        interval: 600000
                         running: true
                         repeat: true
                         triggeredOnStart: true
                         onTriggered: if (!updateProc.running)
                             updateProc.running = true
+                    }
+                    // Fast post-click rechecker — 10×30s = 5 min.
+                    Timer {
+                        id: updateRecheckTimer
+                        interval: 30000
+                        repeat: true
+                        property int attemptsLeft: 0
+                        onTriggered: {
+                            if (!updateProc.running)
+                                updateProc.running = true;
+                            attemptsLeft--;
+                            if (attemptsLeft <= 0 || !updateProc.available)
+                                stop();
+                        }
                     }
                     Process {
                         id: updateProc
@@ -323,6 +353,51 @@ Scope {
                     }
                     Process {
                         id: updateTrig
+                        command: ["true"]
+                    }
+                }
+
+                // Screen recording indicator — visible only while gpu-screen-recorder runs.
+                MouseArea {
+                    id: recordingBtn
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 22
+                    height: 22
+                    cursorShape: Qt.PointingHandCursor
+                    visible: recordingProc.active
+
+                    onClicked: {
+                        recordingTrig.command = ["omarchy-capture-screenrecording"];
+                        if (!recordingTrig.running)
+                            recordingTrig.running = true;
+                    }
+
+                    Text {
+                        anchors.centerIn: parent
+                        color: root.cDanger
+                        font.family: root.fontFamily
+                        font.pixelSize: 14
+                        text: "󰻂"
+                    }
+
+                    Timer {
+                        interval: 1000
+                        running: true
+                        repeat: true
+                        triggeredOnStart: true
+                        onTriggered: if (!recordingProc.running)
+                            recordingProc.running = true
+                    }
+                    Process {
+                        id: recordingProc
+                        property bool active: false
+                        command: ["sh", "-c", "pgrep -f '^gpu-screen-recorder' >/dev/null && echo 1 || echo 0"]
+                        stdout: StdioCollector {
+                            onStreamFinished: recordingProc.active = (this.text.trim() === "1")
+                        }
+                    }
+                    Process {
+                        id: recordingTrig
                         command: ["true"]
                     }
                 }
