@@ -11,28 +11,25 @@ Item {
 
     // Wired by Launcher
     property int currentIndex: -1
-    property color bgColor
-    property color fgColor
-    property color subFgColor
-    property color accentColor
-    property color borderColor
-    property string fontFamily
+    required property var theme       // .bg .fg .subFg .accent .border
+    required property string fontFamily
 
     signal activated(int index)
     signal hovered(int index)
 
     readonly property bool isSelected: index === currentIndex
+    readonly property int iconSize: modelData?.iconSize ?? 48
 
-    height: 44
+    // Row height tracks the icon so larger icons don't get cropped.
+    height: iconSize + 12
     anchors.left:  parent ? parent.left  : undefined
     anchors.right: parent ? parent.right : undefined
 
     // Selection background
     Rectangle {
         anchors.fill: parent
-        radius: 6
         color: row.isSelected
-            ? Qt.rgba(row.accentColor.r, row.accentColor.g, row.accentColor.b, 0.18)
+            ? Qt.rgba(row.theme.accent.r, row.theme.accent.g, row.theme.accent.b, 0.18)
             : "transparent"
         Behavior on color { ColorAnimation { duration: 90 } }
     }
@@ -60,8 +57,8 @@ Item {
         // and a nerd-font glyph if even the fallback can't render.
         Item {
             id: iconBox
-            width: 32
-            height: 32
+            width: row.iconSize
+            height: row.iconSize
             anchors.verticalCenter: parent.verticalCenter
 
             readonly property string primaryUrl: row.modelData?.iconUrl ?? ""
@@ -79,7 +76,7 @@ Item {
                 visible: status === Image.Ready && source !== ""
                 asynchronous: true
                 smooth: true
-                implicitSize: 32
+                implicitSize: row.iconSize
 
                 onStatusChanged: {
                     if (status === Image.Error && !iconBox.primaryFailed)
@@ -87,15 +84,14 @@ Item {
                 }
             }
 
-            // Glyph fallback. Menu category rows get a larger glyph than
-            // app-row icon fallbacks.
+            // Glyph fallback — always fills the icon box.
             Text {
                 anchors.centerIn: parent
                 visible: !iconImg.visible
                 text: row.modelData?.iconText ?? ""
-                color: row.fgColor
+                color: row.theme.fg
                 font.family: row.fontFamily
-                font.pixelSize: row.modelData?.chevron ? 32 : 18
+                font.pixelSize: row.iconSize
                 opacity: 0.9
             }
         }
@@ -109,7 +105,7 @@ Item {
             Text {
                 width: parent.width
                 text: row.modelData?.title ?? ""
-                color: row.fgColor
+                color: row.theme.fg
                 font.family: row.fontFamily
                 font.pixelSize: 13
                 font.bold: row.isSelected
@@ -118,7 +114,7 @@ Item {
             Text {
                 width: parent.width
                 text: row.modelData?.subtitle ?? ""
-                color: row.subFgColor
+                color: row.theme.subFg
                 font.family: row.fontFamily
                 font.pixelSize: 11
                 elide: Text.ElideRight
@@ -138,7 +134,7 @@ Item {
                 anchors.centerIn: parent
                 visible: row.modelData?.chevron === true
                 text: ""
-                color: row.subFgColor
+                color: row.theme.subFg
                 font.family: row.fontFamily
                 font.pixelSize: 14
                 opacity: row.isSelected ? 1.0 : 0.6
@@ -150,14 +146,14 @@ Item {
                 anchors.fill: parent
                 visible: tagBox._showTag
                 radius: 9
-                color: Qt.rgba(row.borderColor.r, row.borderColor.g, row.borderColor.b, 0.35)
+                color: Qt.rgba(row.theme.border.r, row.theme.border.g, row.theme.border.b, 0.35)
             }
             Text {
                 id: tagText
                 anchors.centerIn: parent
                 visible: tagBox._showTag
                 text: row.modelData?.providerTag ?? ""
-                color: row.subFgColor
+                color: row.theme.subFg
                 font.family: row.fontFamily
                 font.pixelSize: 9
                 font.capitalization: Font.AllUppercase

@@ -1,5 +1,6 @@
-// Apps provider — lists `.desktop` apps via Quickshell.DesktopEntries
-// and fuzzy-matches against the query. Activation runs the app.
+// Apps provider — lists `.desktop` apps via Quickshell.DesktopEntries and
+// fuzzy-matches against the query. Activation launches via `uwsm-app` so
+// the process gets a proper systemd user scope.
 
 import QtQuick
 import Quickshell
@@ -10,28 +11,26 @@ Provider {
 
     name: "Apps"
     tag: "app"
-    iconText: ""
+    iconText: "󰘳"
     description: "Search and launch applications"
-    prefix: ""   // always-on
 
-    // Tunables — walker uses 256; we cap searches but show all apps on empty.
+    // Walker uses 256 as its cap; we follow.
     property int maxResults: 256
 
-    // Cached snapshot of [{ entry, name, comment, iconUrl }] to avoid
-    // scanning .desktop entries and resolving icons on every keystroke.
+    // Cached entry snapshot, sorted alphabetically.
     property var _entries: []
 
-    // Index of icons that live OUTSIDE of any theme tree:
-    // /usr/share/icons/<name>.<ext> and /usr/share/pixmaps/<name>.<ext>.
-    // Quickshell.iconPath only resolves themed icons, so we probe these
-    // legacy locations ourselves at startup.
+    // name -> absolute file path, for icons that live OUTSIDE any icon theme
+    // tree (e.g. /usr/share/icons/zed.png). Built at startup since
+    // Quickshell.iconPath only knows about themed icons.
     property var _extraIconIndex: ({})
-    property bool _extraIconsReady: false
 
-    // Set of .desktop file IDs (basename without extension) that contain
-    // `Hidden=true`. XDG spec says such entries must be treated as if absent.
-    // Used by omarchy to mask system apps it doesn't want in the launcher.
+    // Set of .desktop file ids (basename minus extension) containing
+    // `Hidden=true`. Per XDG spec, such entries must be treated as absent.
+    // Omarchy uses this to mask system apps from the launcher.
     property var _hiddenIds: ({})
+
+    readonly property string _genericIconUrl: Quickshell.iconPath("application-x-executable", true) || ""
 
     Component.onCompleted: {
         extraIconScan.running = true;
@@ -49,25 +48,37 @@ Provider {
     Process {
         id: hiddenScan
         running: false
-        command: ["sh", "-c", "for f in " + "~/.local/share/applications/*.desktop " + "/usr/local/share/applications/*.desktop " + "/usr/share/applications/*.desktop; do " + "  [ -f \"$f\" ] || continue; " + "  if grep -qE '^Hidden=true' \"$f\"; then " + "    b=${f##*/}; printf '%s\\n' \"${b%.desktop}\"; " + "  fi; " + "done 2>/dev/null | sort -u"]
+        command: ["sh", "-c", `
+            for f in ~/.local/share/applications/*.desktop \\
+                     /usr/local/share/applications/*.desktop \\
+                     /usr/share/applications/*.desktop; do
+                [ -f "$f" ] || continue
+                if grep -qE '^Hidden=true' "$f"; then
+                    b=\${f##*/}; printf '%s\\n' "\${b%.desktop}"
+                fi
+            done 2>/dev/null | sort -u
+        `]
         stdout: SplitParser {
             splitMarker: "\n"
             onRead: function (line) {
-                if (!line)
-                    return;
-                prov._hiddenIds[line] = true;
+                if (line)
+                    prov._hiddenIds[line] = true;
             }
         }
-        onRunningChanged: {
-            if (!running)
-                prov._rebuildEntries();
-        }
+        onRunningChanged: if (!running)
+            prov._rebuildEntries()
     }
 
     Process {
         id: extraIconScan
         running: false
-        command: ["sh", "-c", "find /usr/share/icons /usr/share/pixmaps " + "~/.local/share/icons ~/.icons " + "-maxdepth 1 -type f " + "\\( -name '*.png' -o -name '*.svg' -o -name '*.xpm' \\) 2>/dev/null"]
+        command: ["sh", "-c", `
+            find /usr/share/icons /usr/share/pixmaps \\
+                 ~/.local/share/icons ~/.icons \\
+                 -maxdepth 1 -type f \\
+                 \\( -name '*.png' -o -name '*.svg' -o -name '*.xpm' \\) \\
+                 2>/dev/null
+        `]
         stdout: SplitParser {
             splitMarker: "\n"
             onRead: function (line) {
@@ -85,58 +96,53 @@ Provider {
                     ix[lc] = line;
             }
         }
-        onRunningChanged: {
-            if (!running) {
-                prov._extraIconsReady = true;
-                prov._rebuildEntries();
-            }
-        }
+        onRunningChanged: if (!running)
+            prov._rebuildEntries()
     }
 
-    function _placeholderUrl() {
-        // Use the themed generic if it resolves; otherwise let the delegate
-        // fall through to the nerd-font glyph (empty source → not Ready).
-        return Quickshell.iconPath("application-x-executable", true) || "";
-    }
+    // ── Icon resolution ──────────────────────────────────────────────────
 
     function _resolveIconUrl(raw) {
-        // .desktop Icon= can be: empty, an absolute path, or a name.
-        if (!raw || raw.length === 0)
-            return _placeholderUrl();
+        if (!raw)
+            return _genericIconUrl;
         if (raw.charAt(0) === "/")
             return "file://" + raw;
 
-        // 1. Unthemed file index (probed at startup from /usr/share/icons/*,
-        //    /usr/share/pixmaps/*, ~/.local/share/icons/*, ~/.icons/*).
+        const fromIndex = _lookupExtra(raw);
+        if (fromIndex)
+            return "file://" + fromIndex;
+
+        // The (name, check: bool) overload returns "" when the icon isn't
+        // resolvable — that's the gate we need to avoid handing the provider
+        // a name that would WARN-spam on load.
+        const themed = Quickshell.iconPath(raw, true);
+        if (themed)
+            return themed;
+
+        return _genericIconUrl;
+    }
+
+    function _lookupExtra(raw) {
         const ix = _extraIconIndex;
         if (ix[raw])
-            return "file://" + ix[raw];
+            return ix[raw];
         const lc = raw.toLowerCase();
         if (ix[lc])
-            return "file://" + ix[lc];
-
-        // 2. Try stripping a trailing extension and re-checking the index.
+            return ix[lc];
+        // Some Icon= values carry an extension; strip and retry.
         const dot = raw.lastIndexOf(".");
         if (dot > 0) {
             const stripped = raw.slice(0, dot);
             if (ix[stripped])
-                return "file://" + ix[stripped];
+                return ix[stripped];
             const sl = stripped.toLowerCase();
             if (ix[sl])
-                return "file://" + ix[sl];
+                return ix[sl];
         }
-
-        // 3. Active icon theme — the (name, check: bool) overload actually
-        //    verifies the icon exists and returns "" if not (vs. the plain
-        //    `iconPath(name)` which always returns "image://icon/<name>"
-        //    even for unknown names, producing WARN spam on load).
-        const themed = Quickshell.iconPath(raw, true);
-        if (themed && themed.length > 0)
-            return themed;
-
-        // 4. Nothing resolved — placeholder.
-        return _placeholderUrl();
+        return "";
     }
+
+    // ── Entry build ──────────────────────────────────────────────────────
 
     function _rebuildEntries() {
         const out = [];
@@ -148,67 +154,51 @@ Provider {
             if (e.id && _hiddenIds[e.id])
                 continue;
             const nm = (e.name || "").trim();
-            if (nm.length === 0)
+            if (!nm)
                 continue;
-            const iconName = (e.icon || "").trim();
-            const iconUrl = _resolveIconUrl(iconName);
+            const comment = (e.comment || e.genericName || "").trim();
             out.push({
                 entry: e,
                 name: nm,
                 nameLower: nm.toLowerCase(),
-                comment: (e.comment || e.genericName || "").trim(),
-                commentLower: (e.comment || e.genericName || "").toLowerCase(),
-                iconName: iconName,
-                iconUrl: iconUrl
+                comment: comment,
+                commentLower: comment.toLowerCase(),
+                iconUrl: _resolveIconUrl((e.icon || "").trim())
             });
         }
-        // Stable alphabetical order, so empty-query lists are predictable.
         out.sort((a, b) => a.nameLower.localeCompare(b.nameLower));
         _entries = out;
-        // Re-run search if there's a live query
-        if (query.length > 0)
-            search(effectiveQuery() ?? "");
-        else
-            search("");
+        refresh();
     }
+
+    // ── Search ───────────────────────────────────────────────────────────
 
     function search(text) {
         const q = (text || "").toLowerCase().trim();
-
         if (q.length === 0) {
-            // Empty query: show the full app list (entries are already sorted).
-            const out = new Array(_entries.length);
-            for (let i = 0; i < _entries.length; i++)
-                out[i] = _toResult(_entries[i], 0);
-            results = out;
+            results = _entries.map(it => _toResult(it, 0));
             return;
         }
-
         const scored = [];
         for (let i = 0; i < _entries.length; i++) {
-            const it = _entries[i];
-            const s = _score(it, q);
+            const s = _score(_entries[i], q);
             if (s > 0)
                 scored.push({
-                    it: it,
+                    it: _entries[i],
                     s: s
                 });
         }
         scored.sort((a, b) => b.s - a.s);
-        const out = [];
-        for (let i = 0; i < scored.length && i < maxResults; i++) {
-            out.push(_toResult(scored[i].it, scored[i].s));
-        }
-        results = out;
+        if (scored.length > maxResults)
+            scored.length = maxResults;
+        results = scored.map(x => _toResult(x.it, x.s));
     }
 
     function _toResult(it, score) {
         return {
             title: it.name,
             subtitle: it.comment,
-            iconName: it.iconName,
             iconUrl: it.iconUrl,
-            iconText: "",
             score: score,
             data: {
                 entry: it.entry
@@ -219,30 +209,26 @@ Provider {
     // Score: higher = better. 0 = no match.
     function _score(it, q) {
         const n = it.nameLower;
-        const c = it.commentLower;
         if (n === q)
             return 1000;
         if (n.startsWith(q))
             return 500 + (50 - Math.min(n.length, 50));
-        const wb = _wordBoundaryMatch(n, q);
+        const wb = _wordInitials(n, q);
         if (wb > 0)
             return 200 + wb;
         if (n.indexOf(q) !== -1)
             return 100;
-        if (c.indexOf(q) !== -1)
+        if (it.commentLower.indexOf(q) !== -1)
             return 40;
-        if (_subseq(n, q))
+        if (_isSubsequence(n, q))
             return 20;
         return 0;
     }
 
-    function _wordBoundaryMatch(name, q) {
-        // Score initials: "Visual Studio Code" + "vsc" => match
+    // "Visual Studio Code" + "vsc" -> match (one hit per word initial).
+    function _wordInitials(name, q) {
         const parts = name.split(/[\s\-_./]+/);
-        if (parts.length === 0)
-            return 0;
-        let qi = 0;
-        let hit = 0;
+        let qi = 0, hit = 0;
         for (let i = 0; i < parts.length && qi < q.length; i++) {
             if (parts[i].length === 0)
                 continue;
@@ -254,21 +240,20 @@ Provider {
         return qi === q.length ? hit * 10 : 0;
     }
 
-    function _subseq(haystack, needle) {
+    function _isSubsequence(haystack, needle) {
         let i = 0;
-        for (let j = 0; j < haystack.length && i < needle.length; j++) {
+        for (let j = 0; j < haystack.length && i < needle.length; j++)
             if (haystack[j] === needle[i])
                 i++;
-        }
         return i === needle.length;
     }
 
+    // ── Activation ───────────────────────────────────────────────────────
+
     function activate(result) {
         const entry = result?.data?.entry;
-        if (!entry) {
-            console.warn("[AppsProvider] activate called with no entry");
+        if (!entry)
             return;
-        }
         const cmd = entry.command || [];
         if (cmd.length === 0) {
             try {
@@ -278,11 +263,10 @@ Provider {
             }
             return;
         }
-        const argv = entry.runInTerminal ? ["uwsm-app", "--", "xdg-terminal-exec", "--"].concat(cmd) : ["uwsm-app", "--"].concat(cmd);
+        launchProc.command = entry.runInTerminal ? ["uwsm-app", "--", "xdg-terminal-exec", "--"].concat(cmd) : ["uwsm-app", "--"].concat(cmd);
+        launchProc.workingDirectory = entry.workingDirectory || "";
         if (launchProc.running)
             launchProc.running = false;
-        launchProc.command = argv;
-        launchProc.workingDirectory = entry.workingDirectory || "";
         launchProc.running = true;
     }
 

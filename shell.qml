@@ -32,12 +32,8 @@ Scope {
     // Toggle via: qs ipc call launcher toggle
     Launcher {
         id: launcher
-        bgColor:     root.cBg
-        fgColor:     root.cFg
-        subFgColor:  root.cSubFg
-        accentColor: root.cAccent
-        borderColor: root.cBorder
-        fontFamily:  root.fontFamily
+        theme: theme
+        fontFamily: root.fontFamily
     }
 
     Variants {

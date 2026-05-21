@@ -1,6 +1,5 @@
 // Files provider — backed by `fd`. Debounced; activation opens via xdg-open.
-// Not yet wired into the launcher's `providers` array — add `filesProv` to
-// the array in Launcher.qml when ready.
+// Each result is shown with a nerd-font glyph (no image lookup).
 
 import QtQuick
 import Quickshell
@@ -11,12 +10,17 @@ Provider {
 
     name: "Files"
     tag: "file"
-    iconText: ""
+    iconText: "󰉋"
     description: "Search files in your home directory"
 
     property int maxResults: 12
     property int debounceMs: 180
     property string searchRoot: Quickshell.env("HOME") || "/"
+
+    // Per-result nerd-font glyphs. Override from Launcher.qml if you want
+    // different icons.
+    property string fileGlyph: "󰈔"
+    property string folderGlyph: ""
 
     property string _pending: ""
     property var _pendingBuf: []
@@ -55,35 +59,45 @@ Provider {
     function _run(q) {
         if (fdProc.running) fdProc.running = false;
         _pendingBuf = [];
-        busy = true;
-        fdProc.command = [
-            "fd", "--hidden", "--no-ignore-vcs",
-            "--exclude", ".git",
-            "--exclude", "node_modules",
-            "--exclude", ".cache",
-            "--max-results", String(maxResults),
-            q, searchRoot
-        ];
+        // We need both the cap (`--max-results`) and a per-path type marker.
+        // fd rejects mixing `--max-results` with `--exec-batch`, so the
+        // pipeline is: fd -0 → head -z (cap) → xargs ls -dF (mark dirs/etc).
+        // q and searchRoot are passed as positional args ($1, $2) so the
+        // shell doesn't need to quote anything.
+        const script =
+            "fd --hidden --no-ignore-vcs " +
+            "--exclude .git --exclude node_modules --exclude .cache " +
+            "-0 -- \"$1\" \"$2\" 2>/dev/null | " +
+            "head -zn " + maxResults + " | " +
+            "xargs -0 -r ls -d -F -- 2>/dev/null";
+        fdProc.command = ["sh", "-c", script, "fd-runner", q, searchRoot];
         fdProc.running = true;
     }
 
     function _flush() {
         const out = [];
         for (let i = 0; i < _pendingBuf.length; i++) {
-            const path  = _pendingBuf[i];
-            const slash = path.lastIndexOf("/");
-            const base  = slash >= 0 ? path.slice(slash + 1) : path;
-            const dir   = slash >= 0 ? path.slice(0, slash)  : "";
+            const raw = _pendingBuf[i];
+            // fd outputs a trailing slash for directories, and `ls -F` adds
+            // another type indicator (`/`, `*`, `@`, `=`, `|`). Strip any
+            // run of those from the end.
+            const m = raw.match(/[\/*@=|]+$/);
+            const indicator = m ? m[0] : "";
+            const isDir = indicator.indexOf("/") !== -1;
+            const clean = indicator.length > 0 ? raw.slice(0, -indicator.length) : raw;
+            const slash = clean.lastIndexOf("/");
+            const base = slash >= 0 ? clean.slice(slash + 1) : clean;
+            const dir  = slash >= 0 ? clean.slice(0, slash)  : "";
             out.push({
-                title: base,
-                subtitle: dir,
-                iconUrl: Quickshell.iconPath("text-x-generic", true) || "",
-                score: maxResults - i,         // preserve fd's relevance order
-                data: { path: path }
+                title:       base,
+                subtitle:    dir,
+                iconText:    isDir ? folderGlyph : fileGlyph,
+                providerTag: isDir ? "folder" : "file",
+                score:       maxResults - i,         // preserve fd's relevance order
+                data:        { path: clean }
             });
         }
         results = out;
-        busy = false;
     }
 
     function activate(result) {
@@ -93,5 +107,8 @@ Provider {
         openProc.running = true;
     }
 
-    Process { id: openProc; running: false }
+    Process {
+        id: openProc
+        running: false
+    }
 }

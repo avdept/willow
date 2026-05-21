@@ -34,7 +34,6 @@ QtObject {
     // ── Wiring ───────────────────────────────────────────────────────────
     property string query: ""       // set by Launcher
     property var results: []        // populated by subclass
-    property bool busy: false       // optional: true while async work runs
 
     // ── Contract (override in subclass) ──────────────────────────────────
     function search(text) {}

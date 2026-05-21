@@ -1,6 +1,11 @@
-// Launcher — floating, layer-shell window with a search input and either a
-// top-level provider menu (Apps, Files, …) or, after drilling in, that
-// provider's results.
+// Launcher — floating, layer-shell window with a search input and a
+// two-pane body: the categories list on the left, and (after drilling in)
+// the active provider's results on the right.
+//
+// In menu mode the categories list spans the full body width. When the user
+// drills into a category, the categories list shrinks to icon-only width
+// (its right edge slides leftward, sweeping over each row's name/chevron)
+// and the provider-results list animates in to fill the remaining space.
 //
 // Open / close via IPC:
 //   qs ipc call launcher toggle
@@ -23,12 +28,22 @@ PanelWindow {
     id: launcher
 
     // ── Theme (set by parent) ────────────────────────────────────────────
-    required property color bgColor
-    required property color fgColor
-    required property color subFgColor
-    required property color accentColor
-    required property color borderColor
+    required property var theme
     required property string fontFamily
+
+    // ── Layout constants ─────────────────────────────────────────────────
+    readonly property int cardWidth: 640
+    readonly property int cardHeight: 460
+    readonly property int searchRowHeight: 56
+    readonly property int footerHeight: 28
+    readonly property int dividerHeight: 1
+    readonly property int categoryRailWidth: 64       // narrowed-categories width
+    readonly property int collapseAnimDuration: 260
+
+    // Animated width of the categories pane. Body width in menu mode (full),
+    // categoryRailWidth in provider mode. Its right edge is the visible
+    // divider that slides from right to left when drilling in.
+    property real categoryListWidth: cardWidth        // overridden by binding below
 
     // ── State ────────────────────────────────────────────────────────────
     property bool open: false
@@ -37,7 +52,14 @@ PanelWindow {
     property string queryText: ""
     property int currentIndex: 0
     property var providers: []
-    property var displayModel: []
+
+    // Left pane: categories OR aggregated results (in menu mode with a query).
+    property var leftModel: []
+    // Right pane: active provider's results.
+    property var rightModel: []
+
+    // The list that owns the keyboard selection.
+    readonly property var activeModel: mode === "provider" ? rightModel : leftModel
 
     // ── Window setup ─────────────────────────────────────────────────────
     anchors { top: true; left: true; right: true; bottom: true }
@@ -60,34 +82,36 @@ PanelWindow {
     FilesProvider { id: filesProv; onResultsChanged: launcher._onProviderResults(1) }
 
     Component.onCompleted: {
-        // Add/remove entries here to control which providers appear in the
-        // top-level menu. (FilesProvider is built but not yet exposed.)
-        providers = [appsProv /*, filesProv */];
-        _computeMenu();
+        providers = [appsProv, filesProv];
+        _computeLeft();
     }
 
     // ── State transitions ────────────────────────────────────────────────
     function show() {
-        mode = "menu";
-        activeProvIdx = -1;
-        queryText = "";
-        currentIndex = 0;
-        _computeMenu();
+        _resetState();
+        _computeLeft();
         open = true;
         Qt.callLater(() => searchField.forceActiveFocus());
     }
 
     function hide() {
         open = false;
+        _resetState();
+    }
+
+    function _resetState() {
         mode = "menu";
         activeProvIdx = -1;
         queryText = "";
         currentIndex = 0;
+        rightModel = [];
     }
 
     function enterProvider(displayIdx) {
-        if (mode !== "menu" || displayIdx < 0 || displayIdx >= displayModel.length) return;
-        const provIdx = displayModel[displayIdx]._provIdx;
+        if (mode !== "menu" || displayIdx < 0 || displayIdx >= leftModel.length) return;
+        const item = leftModel[displayIdx];
+        if (!item.chevron) return;        // aggregated result, not a category
+        const provIdx = item._provIdx;
         const p = providers[provIdx];
         if (!p) return;
         activeProvIdx = provIdx;
@@ -95,16 +119,26 @@ PanelWindow {
         queryText = "";
         currentIndex = 0;
         p.query = "";
-        p.refresh();                  // guaranteed search call (signal-safe)
+        p.refresh();
+        _computeLeft();                   // rebuild left as static category list
+        _refreshProviderResults();
+    }
+
+    function switchToCategory(provIdx) {
+        if (provIdx === activeProvIdx) return;
+        const p = providers[provIdx];
+        if (!p) return;
+        activeProvIdx = provIdx;
+        queryText = "";
+        currentIndex = 0;
+        p.query = "";
+        p.refresh();
         _refreshProviderResults();
     }
 
     function backToMenu() {
-        mode = "menu";
-        activeProvIdx = -1;
-        queryText = "";
-        currentIndex = 0;
-        _computeMenu();
+        _resetState();
+        _computeLeft();
     }
 
     function goBack() {
@@ -113,8 +147,9 @@ PanelWindow {
     }
 
     function activateCurrent() {
-        if (currentIndex < 0 || currentIndex >= displayModel.length) return;
-        const item = displayModel[currentIndex];
+        const model = activeModel;
+        if (currentIndex < 0 || currentIndex >= model.length) return;
+        const item = model[currentIndex];
         if (item.chevron) { enterProvider(currentIndex); return; }
         const p = providers[item._provIdx];
         if (p && item._result) p.activate(item._result);
@@ -122,22 +157,22 @@ PanelWindow {
     }
 
     function moveSelection(delta) {
-        const n = displayModel.length;
+        const n = activeModel.length;
         if (n === 0) return;
         currentIndex = ((currentIndex + delta) % n + n) % n;
-        resultsList.positionViewAtIndex(currentIndex, ListView.Contain);
+        const list = mode === "provider" ? rightList : leftList;
+        list.positionViewAtIndex(currentIndex, ListView.Contain);
     }
 
-    // ── Model computation ────────────────────────────────────────────────
+    // ── Model construction ───────────────────────────────────────────────
 
-    // Build a display-row from a provider's result.
     function _resultRow(provIdx, p, r) {
         return {
             title:       r.title,
             subtitle:    r.subtitle,
             iconUrl:     r.iconUrl,
             iconText:    r.iconText || p.iconText,
-            providerTag: p.tag,
+            providerTag: r.providerTag ?? p.tag,           // result may override
             chevron:     false,
             _provIdx:    provIdx,
             _result:     r,
@@ -145,7 +180,6 @@ PanelWindow {
         };
     }
 
-    // Build a display-row for a top-level category entry.
     function _categoryRow(provIdx, p) {
         return {
             title:       p.name,
@@ -160,15 +194,10 @@ PanelWindow {
         };
     }
 
-    function _computeMenu() {
-        if (mode !== "menu") return;
+    function _computeLeft() {
         const out = [];
-        if (queryText.trim().length === 0) {
-            // Empty query → category list.
-            for (let i = 0; i < providers.length; i++)
-                if (providers[i]) out.push(_categoryRow(i, providers[i]));
-        } else {
-            // Non-empty query → aggregated results across all providers.
+        if (mode === "menu" && queryText.trim().length > 0) {
+            // Aggregated results across all providers.
             for (let i = 0; i < providers.length; i++) {
                 const p = providers[i];
                 if (!p) continue;
@@ -176,39 +205,43 @@ PanelWindow {
                 for (let j = 0; j < rs.length; j++) out.push(_resultRow(i, p, rs[j]));
             }
             out.sort((a, b) => b._score - a._score);
+        } else {
+            // Categories — always rendered, even in provider mode (clipped
+            // to icon-only because the pane is narrow there).
+            for (let i = 0; i < providers.length; i++)
+                if (providers[i]) out.push(_categoryRow(i, providers[i]));
         }
-        _setDisplay(out);
+        leftModel = out;
+        _clampCurrent();
     }
 
     function _refreshProviderResults() {
-        if (mode !== "provider") return;
+        if (mode !== "provider" || activeProvIdx < 0) { rightModel = []; return; }
         const p = providers[activeProvIdx];
-        if (!p) { _setDisplay([]); return; }
+        if (!p) { rightModel = []; return; }
         const rs = (p.results || []).slice().sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-        _setDisplay(rs.map(r => _resultRow(activeProvIdx, p, r)));
+        rightModel = rs.map(r => _resultRow(activeProvIdx, p, r));
+        _clampCurrent();
     }
 
-    function _setDisplay(model) {
-        displayModel = model;
-        if (currentIndex >= model.length) currentIndex = Math.max(0, model.length - 1);
+    function _clampCurrent() {
+        if (currentIndex >= activeModel.length)
+            currentIndex = Math.max(0, activeModel.length - 1);
     }
 
     function _onProviderResults(idx) {
         if (mode === "provider" && idx === activeProvIdx) _refreshProviderResults();
-        else if (mode === "menu" && queryText.length > 0) _computeMenu();
+        else if (mode === "menu" && queryText.length > 0) _computeLeft();
     }
 
     onQueryTextChanged: {
         currentIndex = 0;
         if (mode === "menu") {
-            // Broadcast to every provider so the aggregated view has data.
-            // Skip on empty query — the menu shows categories then, and
-            // stale provider results don't matter.
             if (queryText.length > 0) {
                 for (let i = 0; i < providers.length; i++)
                     if (providers[i]) providers[i].query = queryText;
             }
-            _computeMenu();
+            _computeLeft();
         } else if (activeProvIdx >= 0 && providers[activeProvIdx]) {
             providers[activeProvIdx].query = queryText;
         }
@@ -219,16 +252,21 @@ PanelWindow {
     // Click-outside dismiss
     MouseArea { anchors.fill: parent; onClicked: launcher.hide() }
 
+    component HintText : Text {
+        color: launcher.theme.subFg
+        font.family: launcher.fontFamily
+        font.pixelSize: 10
+    }
+
     Rectangle {
         id: card
-        width: 640
-        height: 460
+        width: launcher.cardWidth
+        height: launcher.cardHeight
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
         anchors.topMargin: Math.max(64, parent.height * 0.18)
-        radius: 10
-        color: launcher.bgColor
-        border.color: launcher.borderColor
+        color: launcher.theme.bg
+        border.color: launcher.theme.border
         border.width: 1
 
         opacity: launcher.open ? 1 : 0
@@ -243,8 +281,16 @@ PanelWindow {
             shadowVerticalOffset: 8
         }
 
-        // Swallow clicks so the outer dismiss-area doesn't fire.
         MouseArea { anchors.fill: parent; onClicked: {} }
+
+        // Drive the animated categoryListWidth: full body width in menu mode,
+        // categoryRailWidth in provider mode. The Behavior is what makes the
+        // right edge of the categories pane slide leftward on drill-in.
+        Binding {
+            target: launcher
+            property: "categoryListWidth"
+            value: launcher.mode === "provider" ? launcher.categoryRailWidth : body.width
+        }
 
         Column {
             anchors.fill: parent
@@ -252,7 +298,7 @@ PanelWindow {
             // ── Search row ───────────────────────────────────────────────
             Item {
                 width: parent.width
-                height: 56
+                height: launcher.searchRowHeight
 
                 Text {
                     id: searchIcon
@@ -260,7 +306,7 @@ PanelWindow {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: parent.left
                     anchors.leftMargin: 18
-                    color: launcher.subFgColor
+                    color: launcher.theme.subFg
                     font.family: launcher.fontFamily
                     font.pixelSize: 18
                 }
@@ -272,12 +318,12 @@ PanelWindow {
                     anchors.leftMargin: 12
                     anchors.right: parent.right
                     anchors.rightMargin: 18
-                    color: launcher.fgColor
+                    color: launcher.theme.fg
                     font.family: launcher.fontFamily
                     font.pixelSize: 16
                     selectByMouse: true
                     clip: true
-                    selectionColor: launcher.accentColor
+                    selectionColor: launcher.theme.accent
                     text: launcher.queryText
                     onTextChanged: launcher.queryText = text
 
@@ -287,7 +333,7 @@ PanelWindow {
                         text: launcher.mode === "menu"
                             ? "Search apps, files, …"
                             : ("Search " + (launcher.providers[launcher.activeProvIdx]?.name ?? "") + "…")
-                        color: launcher.subFgColor
+                        color: launcher.theme.subFg
                         font: parent.font
                         opacity: 0.5
                         visible: searchField.text.length === 0
@@ -295,7 +341,7 @@ PanelWindow {
 
                     Keys.onPressed: function (event) {
                         switch (event.key) {
-                        case Qt.Key_Escape:    launcher.goBack();        event.accepted = true; break;
+                        case Qt.Key_Escape:    launcher.goBack();          event.accepted = true; break;
                         case Qt.Key_Return:
                         case Qt.Key_Enter:     launcher.activateCurrent(); event.accepted = true; break;
                         case Qt.Key_Down:      launcher.moveSelection(1);  event.accepted = true; break;
@@ -303,8 +349,6 @@ PanelWindow {
                         case Qt.Key_PageDown:  launcher.moveSelection(5);  event.accepted = true; break;
                         case Qt.Key_PageUp:    launcher.moveSelection(-5); event.accepted = true; break;
                         case Qt.Key_Backspace:
-                            // Backspace on an empty input inside a provider
-                            // pops back to the menu.
                             if (launcher.mode === "provider" && searchField.text.length === 0) {
                                 launcher.backToMenu();
                                 event.accepted = true;
@@ -317,99 +361,134 @@ PanelWindow {
 
             Rectangle {
                 width: parent.width
-                height: 1
-                color: launcher.borderColor
+                height: launcher.dividerHeight
+                color: launcher.theme.border
                 opacity: 0.6
             }
 
-            // ── Drill-down breadcrumb (provider mode only) ───────────────
+            // ── Body: categories pane (left) + provider results pane (right) ─
             Item {
-                visible: launcher.mode === "provider"
+                id: body
                 width: parent.width
-                height: visible ? 28 : 0
+                height: parent.height - launcher.searchRowHeight - launcher.dividerHeight - launcher.footerHeight
 
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: launcher.backToMenu()
-                }
-
-                Row {
-                    anchors.verticalCenter: parent.verticalCenter
+                // Categories pane — width animates. Each row clips to icon
+                // when the pane is narrow (provider mode).
+                ListView {
+                    id: leftList
                     anchors.left: parent.left
-                    anchors.leftMargin: 18
-                    spacing: 8
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    width: launcher.categoryListWidth
+                    clip: true
+                    model: launcher.leftModel
+                    spacing: 2
+                    topMargin: 6
+                    bottomMargin: 6
+                    boundsBehavior: Flickable.StopAtBounds
 
+                    Behavior on width { NumberAnimation { duration: launcher.collapseAnimDuration; easing.type: Easing.OutCubic } }
+
+                    delegate: ResultDelegate {
+                        width: ListView.view.width - 12
+                        x: 6
+                        // In menu mode the keyboard selection lives here; in
+                        // provider mode the row matching the active category
+                        // stays highlighted instead.
+                        currentIndex: launcher.mode === "menu"
+                            ? launcher.currentIndex
+                            : launcher.activeProvIdx
+                        theme: launcher.theme
+                        fontFamily: launcher.fontFamily
+                        onActivated: function (i) {
+                            if (launcher.mode === "menu") {
+                                launcher.currentIndex = i;
+                                launcher.activateCurrent();
+                            } else {
+                                // In provider mode, clicking a category icon
+                                // switches to that provider.
+                                const item = launcher.leftModel[i];
+                                if (item && item.chevron) launcher.switchToCategory(item._provIdx);
+                            }
+                        }
+                        onHovered: function (i) {
+                            if (launcher.mode === "menu" && launcher.currentIndex !== i)
+                                launcher.currentIndex = i;
+                        }
+                    }
+
+                    // Empty state — only relevant in menu mode.
                     Text {
-                        text: ""
-                        color: launcher.subFgColor
+                        anchors.centerIn: parent
+                        visible: launcher.mode === "menu" && launcher.leftModel.length === 0
+                        text: launcher.queryText.length === 0 ? "No categories" : "No results"
+                        color: launcher.theme.subFg
                         font.family: launcher.fontFamily
-                        font.pixelSize: 11
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                    Text {
-                        text: launcher.providers[launcher.activeProvIdx]?.name ?? ""
-                        color: launcher.subFgColor
-                        font.family: launcher.fontFamily
-                        font.pixelSize: 10
-                        font.capitalization: Font.AllUppercase
-                        font.letterSpacing: 1.2
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                }
-            }
-
-            // ── Results / menu ───────────────────────────────────────────
-            ListView {
-                id: resultsList
-                width: parent.width
-                height: parent.height - 56 - 1 - (launcher.mode === "provider" ? 28 : 0) - 28
-                clip: true
-                model: launcher.displayModel
-                spacing: 2
-                topMargin: 6
-                bottomMargin: 6
-                boundsBehavior: Flickable.StopAtBounds
-
-                delegate: ResultDelegate {
-                    width: ListView.view.width - 12
-                    x: 6
-                    // `modelData` and `index` are auto-filled by ListView.
-                    currentIndex: launcher.currentIndex
-                    bgColor: launcher.bgColor
-                    fgColor: launcher.fgColor
-                    subFgColor: launcher.subFgColor
-                    accentColor: launcher.accentColor
-                    borderColor: launcher.borderColor
-                    fontFamily: launcher.fontFamily
-                    onActivated: function (i) {
-                        launcher.currentIndex = i;
-                        launcher.activateCurrent();
-                    }
-                    onHovered: function (i) {
-                        if (launcher.currentIndex !== i) launcher.currentIndex = i;
+                        font.pixelSize: 13
+                        opacity: 0.7
                     }
                 }
 
-                // Empty state
-                Text {
-                    anchors.centerIn: parent
-                    visible: launcher.displayModel.length === 0
-                    text: launcher.mode === "menu"
-                        ? (launcher.queryText.length === 0 ? "No categories" : "No results")
-                        : (launcher.queryText.length === 0 ? "Start typing…" : "No results")
-                    color: launcher.subFgColor
-                    font.family: launcher.fontFamily
-                    font.pixelSize: 13
-                    opacity: 0.7
+                // Vertical divider on the right edge of the categories pane,
+                // visible only in provider mode (acts as the gutter between
+                // the two panes after the animation completes).
+                Rectangle {
+                    width: launcher.dividerHeight
+                    height: parent.height
+                    anchors.left: leftList.right
+                    color: launcher.theme.border
+                    visible: launcher.mode === "provider"
+                }
+
+                // Provider results pane — empty/hidden in menu mode.
+                ListView {
+                    id: rightList
+                    anchors.left: leftList.right
+                    anchors.leftMargin: launcher.dividerHeight
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    clip: true
+                    model: launcher.rightModel
+                    spacing: 2
+                    topMargin: 6
+                    bottomMargin: 6
+                    boundsBehavior: Flickable.StopAtBounds
+                    visible: launcher.mode === "provider"
+
+                    delegate: ResultDelegate {
+                        width: ListView.view.width - 12
+                        x: 6
+                        currentIndex: launcher.mode === "provider" ? launcher.currentIndex : -1
+                        theme: launcher.theme
+                        fontFamily: launcher.fontFamily
+                        onActivated: function (i) {
+                            launcher.currentIndex = i;
+                            launcher.activateCurrent();
+                        }
+                        onHovered: function (i) {
+                            if (launcher.mode === "provider" && launcher.currentIndex !== i)
+                                launcher.currentIndex = i;
+                        }
+                    }
+
+                    Text {
+                        anchors.centerIn: parent
+                        visible: launcher.rightModel.length === 0
+                        text: launcher.queryText.length === 0 ? "Start typing…" : "No results"
+                        color: launcher.theme.subFg
+                        font.family: launcher.fontFamily
+                        font.pixelSize: 13
+                        opacity: 0.7
+                    }
                 }
             }
 
             // ── Footer hints ─────────────────────────────────────────────
             Rectangle {
                 width: parent.width
-                height: 28
-                color: Qt.rgba(launcher.borderColor.r, launcher.borderColor.g, launcher.borderColor.b, 0.2)
+                height: launcher.footerHeight
+                color: Qt.rgba(launcher.theme.border.r, launcher.theme.border.g, launcher.theme.border.b, 0.2)
 
                 Row {
                     anchors.verticalCenter: parent.verticalCenter
@@ -417,26 +496,23 @@ PanelWindow {
                     anchors.leftMargin: 14
                     spacing: 14
 
-                    Text { text: "↑↓ navigate"; color: launcher.subFgColor; font.family: launcher.fontFamily; font.pixelSize: 10 }
-                    Text { text: launcher.mode === "menu" ? "↵ open" : "↵ launch"; color: launcher.subFgColor; font.family: launcher.fontFamily; font.pixelSize: 10 }
-                    Text { text: launcher.mode === "menu" ? "esc close" : "esc back"; color: launcher.subFgColor; font.family: launcher.fontFamily; font.pixelSize: 10 }
+                    HintText { text: "↑↓ navigate" }
+                    HintText { text: launcher.mode === "menu" ? "↵ open"    : "↵ launch" }
+                    HintText { text: launcher.mode === "menu" ? "esc close" : "esc back"  }
                 }
 
-                Text {
+                HintText {
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.right: parent.right
                     anchors.rightMargin: 14
                     text: {
-                        const n = launcher.displayModel.length;
+                        const n = launcher.activeModel.length;
                         const inMenuEmpty = launcher.mode === "menu" && launcher.queryText.length === 0;
                         const noun = inMenuEmpty
                             ? (n === 1 ? "category" : "categories")
                             : (n === 1 ? "result"   : "results");
                         return n + " " + noun;
                     }
-                    color: launcher.subFgColor
-                    font.family: launcher.fontFamily
-                    font.pixelSize: 10
                 }
             }
         }
