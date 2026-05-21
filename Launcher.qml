@@ -118,9 +118,17 @@ PanelWindow {
         // `requestedWidth` directly, so it doesn't need a handler.)
         onDetailsEnabledChanged: if (launcher.activeProvIdx === 3) launcher._syncRightLayout()
     }
+    CalendarProvider { id: calProv; onResultsChanged: launcher._onProviderResults(4) }
 
     Component.onCompleted: {
-        providers = [appsProv, filesProv, styleProv, ghProv];
+        providers = [appsProv, filesProv, styleProv, ghProv, calProv];
+        // Any provider can ask the launcher to close itself (e.g. after
+        // opening a URL externally) by emitting `requestClose`.
+        for (let i = 0; i < providers.length; i++) {
+            const p = providers[i];
+            if (p && p.requestClose)
+                p.requestClose.connect(launcher.hide);
+        }
         _computeLeft();
     }
 
@@ -203,8 +211,13 @@ PanelWindow {
     }
 
     function backToMenu() {
+        // Preserve the highlight on the category we're returning from,
+        // so escape / empty-backspace lands on the same row in the menu
+        // instead of snapping back to the first category.
+        const last = activeProvIdx;
         _resetState();
         _computeLeft();
+        if (last >= 0 && last < leftModel.length) currentIndex = last;
     }
 
     function goBack() {
@@ -225,10 +238,14 @@ PanelWindow {
         // In menu mode a chevron row is a category — drill in.
         if (mode === "menu" && item.chevron) { enterProvider(currentIndex); return; }
         const p = providers[item._provIdx];
-        if (p && item._result) p.activate(item._result);
+        // Providers can return truthy from activate() to keep us open
+        // (e.g. live theme/font previews where the user is iterating).
+        let keepOpen = false;
+        if (p && item._result) keepOpen = !!p.activate(item._result);
         // Chevron rows inside a provider are sub-sections (e.g. Style →
-        // Theme). The provider switches view; keep the launcher open.
-        if (!item.chevron) hide();
+        // Theme). Those keep the launcher open already; plus anything
+        // the provider explicitly asked to hold open.
+        if (!item.chevron && !keepOpen) hide();
     }
 
     // Active layout for the right pane. Set explicitly via
@@ -258,10 +275,13 @@ PanelWindow {
         }
         const p = providers[activeProvIdx];
         if (!p) { rightLayout = "list"; rightGridColumns = 1; detailsEnabled = false; detailsWidth = 0; currentDetail = null; return; }
-        rightLayout      = p.resultsLayout === "grid" ? "grid" : "list";
+        rightLayout      = p.resultsLayout === "grid"   ? "grid"
+                         : p.resultsLayout === "custom" ? "custom"
+                         : "list";
         rightGridColumns = Math.max(1, p.gridColumns || 4);
         rightCellHeight  = Math.max(1, p.cellHeight  || 160);
-        detailsEnabled   = p.detailsEnabled === true;
+        // Custom layouts handle their own selection; suppress details.
+        detailsEnabled   = rightLayout !== "custom" && p.detailsEnabled === true;
         detailsWidth     = detailsEnabled ? Math.max(200, p.detailWidth || 380) : 0;
         currentDetail    = detailsEnabled ? p.detail : null;
     }
@@ -308,6 +328,10 @@ PanelWindow {
             subtitle:    r.subtitle,
             iconUrl:     r.iconUrl,
             iconText:    r.iconText || p.iconText,
+            // Live category icon — provider falls back to its own when the
+            // row didn't bring one. Result rows in aggregated menu-mode
+            // searches inherit the provider's component this way.
+            iconComponent: r.iconComponent || p.iconComponent,
             // Chevron rows in provider results (e.g. Style → Theme) are
             // sub-section entries — render them as menu rows, not tagged
             // results.
@@ -335,6 +359,7 @@ PanelWindow {
             subtitle:    p.description,
             iconUrl:     "",
             iconText:    p.iconText,
+            iconComponent: p.iconComponent,
             providerTag: "",
             chevron:     true,
             _provIdx:    provIdx,
@@ -540,6 +565,18 @@ PanelWindow {
                     }
 
                     Keys.onPressed: function (event) {
+                        // Custom layouts intercept first — they own arrow
+                        // keys (calendar date nav, etc). Escape still
+                        // falls through to the launcher.
+                        if (launcher.mode === "provider"
+                            && launcher.rightLayout === "custom"
+                            && event.key !== Qt.Key_Escape) {
+                            const cp = launcher.providers[launcher.activeProvIdx];
+                            if (cp && cp.handleKey && cp.handleKey(event)) {
+                                event.accepted = true;
+                                return;
+                            }
+                        }
                         // In grid layout, Up/Down jump by a full row and
                         // Left/Right step through cells. In list layout,
                         // Left/Right pass through to the text cursor.
@@ -757,6 +794,28 @@ PanelWindow {
                         font.family: launcher.fontFamily
                         font.pixelSize: 13
                         opacity: 0.7
+                    }
+                }
+
+                // Provider results pane — fully custom (provider draws it all).
+                Loader {
+                    id: rightCustom
+                    anchors.left: leftList.right
+                    anchors.leftMargin: launcher.dividerHeight
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    visible: launcher.mode === "provider" && launcher.rightLayout === "custom"
+                    active: visible
+                    sourceComponent: {
+                        if (!visible) return null;
+                        const p = launcher.providers[launcher.activeProvIdx];
+                        return p ? p.customComponent : null;
+                    }
+                    onLoaded: if (item) {
+                        item.theme = launcher.theme;
+                        item.fontFamily = launcher.fontFamily;
+                        item.provider = launcher.providers[launcher.activeProvIdx];
                     }
                 }
 

@@ -53,14 +53,16 @@ Item {
         anchors.rightMargin: 14
         spacing: 12
 
-        // Icon: primary URL with a generic-app fallback on load error,
-        // and a nerd-font glyph if even the fallback can't render.
+        // Icon: prefer a provider-supplied live Component (e.g. the
+        // Calendar tear-off page), else a URL image, else a nerd-font
+        // glyph. The Loader path wins outright when present.
         Item {
             id: iconBox
             width: row.iconSize
             height: row.iconSize
             anchors.verticalCenter: parent.verticalCenter
 
+            readonly property var customIcon: row.modelData?.iconComponent ?? null
             readonly property string primaryUrl: row.modelData?.iconUrl ?? ""
             property bool primaryFailed: false
 
@@ -73,13 +75,25 @@ Item {
             // generic executable icon (legacy fallback for `.desktop` apps).
             readonly property bool _hasGlyph: (row.modelData?.iconText ?? "").length > 0
 
+            Loader {
+                id: customIconLoader
+                anchors.fill: parent
+                active: iconBox.customIcon !== null
+                sourceComponent: iconBox.customIcon
+                visible: active && status === Loader.Ready
+                onLoaded: if (item) {
+                    item.theme = row.theme;
+                    item.fontFamily = row.fontFamily;
+                }
+            }
+
             IconImage {
                 id: iconImg
                 anchors.fill: parent
                 source: iconBox.primaryFailed
                     ? (iconBox._hasGlyph ? "" : "image://icon/application-x-executable")
                     : iconBox.primaryUrl
-                visible: status === Image.Ready && source !== ""
+                visible: !customIconLoader.active && status === Image.Ready && source !== ""
                 asynchronous: true
                 smooth: true
                 implicitSize: row.iconSize
@@ -93,7 +107,7 @@ Item {
             // Glyph fallback — always fills the icon box.
             Text {
                 anchors.centerIn: parent
-                visible: !iconImg.visible
+                visible: !customIconLoader.active && !iconImg.visible
                 text: row.modelData?.iconText ?? ""
                 color: row.theme.fg
                 font.family: row.fontFamily

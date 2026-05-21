@@ -27,6 +27,13 @@ QtObject {
     property string iconText: ""        // nerd-font glyph for menu/fallback
     property string description: ""     // subtitle in the top-level menu
 
+    // Optional live category icon. When set, the launcher renders this
+    // Component in the icon slot of category rows (and as the per-row
+    // fallback) instead of the static `iconText` glyph. The component
+    // gets `theme` and `fontFamily` injected on load and is expected to
+    // anchor.fill its parent (the icon box, default 48×48).
+    property Component iconComponent: null
+
     // If non-empty, the provider only runs when the query is exactly `prefix`
     // or starts with `prefix + " "` (e.g. "f foo"). Empty = always active.
     property string prefix: ""
@@ -73,13 +80,20 @@ QtObject {
 
     // Optional: how the launcher should render this provider's results
     // in the right pane.
-    //   "list" — vertical list of rows (default; uses ResultDelegate)
-    //   "grid" — tiled cells with preview + label (uses ResultGridCell)
+    //   "list"   — vertical list of rows (default; uses ResultDelegate)
+    //   "grid"   — tiled cells with preview + label (uses ResultGridCell)
+    //   "custom" — provider draws the whole right pane via `customComponent`
     property string resultsLayout: "list"
 
     // Grid params — read only when resultsLayout === "grid".
     property int gridColumns: 4
     property int cellHeight: 160
+
+    // When `resultsLayout === "custom"`, the launcher renders this
+    // Component into the right pane and passes `theme`, `fontFamily`,
+    // and `provider` (this object) through to it. The component drives
+    // its own layout, keyboard handling, and activation.
+    property Component customComponent: null
 
     // ── Wiring ───────────────────────────────────────────────────────────
     property string query: ""       // set by Launcher
@@ -90,8 +104,17 @@ QtObject {
     // each view starts fresh.
     signal viewChanged()
 
+    // Emitted when the provider wants the launcher to fully close (e.g.
+    // a calendar event chip's URL was just opened — keeping the launcher
+    // around would steal focus from the browser). The launcher wires
+    // this to `hide()` at construction time.
+    signal requestClose()
+
     // ── Contract (override in subclass) ──────────────────────────────────
     function search(text) {}
+    // Return a truthy value to keep the launcher open after activation
+    // (e.g. theme picks where you want to see the new colors live).
+    // Return falsy / nothing for the default behaviour: launcher hides.
     function activate(result) {}
 
     // Optional: providers with internal sub-views override this. Return
@@ -104,6 +127,12 @@ QtObject {
     // when it returns to the category menu or closes, so the next
     // drill-in starts at the provider's root view.
     function reset() {}
+
+    // Optional: intercept keyboard input before the launcher's default
+    // arrow/enter/escape handling. Only called when this provider is
+    // active and uses a custom layout. Return true if the event was
+    // handled (the launcher will mark it accepted).
+    function handleKey(event) { return false }
 
     // ── Helpers (do not override) ────────────────────────────────────────
 

@@ -96,6 +96,28 @@ Provider {
             prov.refresh()
     }
 
+    // Watch omarchy's theme marker so the "current theme" indicator in
+    // the picker refreshes when the theme is changed from elsewhere
+    // (e.g. another hotkey, or the launcher itself when we don't reset
+    // state on close). Mirrors the watcher in Theme.qml — `reload()`
+    // re-establishes the watch after omarchy's atomic dir-swap.
+    readonly property string _themeMarkerPath: {
+        const xdg = Quickshell.env("XDG_CONFIG_HOME");
+        const home = Quickshell.env("HOME");
+        const base = xdg && xdg.length > 0 ? xdg : (home + "/.config");
+        return base + "/omarchy/current/theme.name";
+    }
+
+    FileView {
+        path: prov._themeMarkerPath
+        watchChanges: true
+        onFileChanged: {
+            reload();
+            if (themeCurrentProc.running) themeCurrentProc.running = false;
+            themeCurrentProc.running = true;
+        }
+    }
+
     // Emits `<display-name>\t<preview-path>` for every theme. Mirrors
     // omarchy_themes.lua: preview.png > preview.jpg > first file in
     // backgrounds/. User-dir entries win over $OMARCHY_PATH defaults.
@@ -448,13 +470,16 @@ Provider {
             _setView(d.section);
             return;
         }
+        // Theme + font activations keep the launcher open (return true)
+        // so the user can preview the change live and pick another one
+        // without having to reopen.
         if (d.kind === "theme" && d.name) {
             themeSetProc.command = ["omarchy-theme-set", d.name];
             if (themeSetProc.running)
                 themeSetProc.running = false;
             themeSetProc.running = true;
             _currentTheme = d.name;
-            return;
+            return true;
         }
         if (d.kind === "font" && d.name) {
             fontSetProc.command = ["omarchy-font-set", d.name];
@@ -462,7 +487,7 @@ Provider {
                 fontSetProc.running = false;
             fontSetProc.running = true;
             _currentFont = d.name;
-            return;
+            return true;
         }
         if (d.kind === "unlock" && d.dir) {
             // sudo prompt — must run in a floating terminal so the user

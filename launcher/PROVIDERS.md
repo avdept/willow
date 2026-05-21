@@ -30,6 +30,17 @@ Opt-in extensions:
   emit `viewChanged()`, override `goBack()` and `reset()`.
 - **Custom layout** — set `resultsLayout: "grid"` plus `gridColumns` /
   `cellHeight` to render a tiled grid (e.g. theme picker).
+- **Fully custom pane** — set `resultsLayout: "custom"` and provide a
+  `customComponent: Component { … }`. The launcher renders it into the
+  right pane and injects `theme`, `fontFamily`, and `provider` (this
+  object) as properties on the root item. Override `handleKey(event)`
+  to intercept arrow/page keys before the launcher's defaults — return
+  `true` when consumed. Escape always falls through to the launcher.
+- **Live category icon** — set `iconComponent: Component { … }`. The
+  launcher renders it in place of `iconText` in the icon slot of the
+  provider's category row (and as the per-row fallback). `theme` and
+  `fontFamily` are injected; the component should anchor.fill its
+  parent (the icon box, 48×48 by default).
 - **Wider/taller popup** — set `requestedWidth` / `requestedHeight`.
   Clamped to `maxWidthRatio`/`maxHeightRatio` of the screen.
 - **Side-by-side details pane** — set `detailsEnabled: true` and
@@ -57,6 +68,20 @@ match", ~500 for prefix, ~100 for substring, ~20 for fuzzy.
   blue). Owner avatars via `https://github.com/<login>.png`. Opts into
   the side-by-side details pane (PR/issue body, repo stats, …) with a
   per-URL detail cache. Activation opens the item URL via `xdg-open`.
+- **CalendarProvider** — owns calendar state (current month/year,
+  focused day) and delegates rendering to per-view components under
+  `launcher/calendar/`. Today: `MonthComponent` (Apple-style 6×7 grid
+  backed by `QtQuick.Controls`'s `MonthGrid` + `DayOfWeekRow`,
+  locale-aware). Uses the `resultsLayout: "custom"` hook to draw the
+  whole right pane; the category icon is a live `CalendarIcon`
+  (tear-off page showing today's weekday + date). Cells render up to
+  3 event chips from `EventsModel`, which shells out to
+  `calendar-events.py` against vdirsyncer's local cache
+  (`~/.local/share/vdirsyncer/calendars/`). Today is a filled circle
+  in `theme.danger`; the focused day gets a tinted background.
+  Arrow keys move the focused day; PgUp/PgDn flip month; Home jumps
+  to today. Setup (Google OAuth → vdirsyncer → khal → systemd timer):
+  see [`calendar/SETUP.md`](calendar/SETUP.md).
 
 ---
 
@@ -88,6 +113,21 @@ skeleton/contract is the same for each.
   - logout → `uwsm stop` (or `hyprctl dispatch exit`)
 - **Open question**: confirmation dialog for shutdown/reboot? Or trust
   the user (it's a launcher)?
+
+### CalendarProvider — next steps
+
+- Week + day modes (toggle in the header). Reuse `MonthGrid`'s data for
+  the week strip; render the day view as a vertical timeline.
+- New-event UI — small inline form on the focused day that runs
+  `khal new …`; vdirsyncer pushes on the next sync.
+- Date jump from the search input — typing "may 25" or "next thu"
+  moves `focusedDate`. Until then, the search field is inert in this
+  provider.
+- "Stale cache" indicator in the header when the newest mtime under
+  `~/.local/share/vdirsyncer/calendars/` is older than ~2× the
+  configured sync interval (see [`calendar/SETUP.md`](calendar/SETUP.md) § 6).
+- Multi-day events as horizontal bars spanning cells (currently they
+  show as a chip on the start day only).
 
 ### ClipboardProvider — cliphist history
 

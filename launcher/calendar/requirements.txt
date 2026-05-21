@@ -1,0 +1,8 @@
+# Deps for calendar-events.py — the helper EventsModel.qml shells out to.
+# Install system-wide via pacman (preferred on Arch):
+#     sudo pacman -S python-icalendar python-recurring-ical-events python-dateutil
+# Or into a venv / user site via pip:
+#     pip install -r launcher/calendar/requirements.txt
+icalendar
+recurring-ical-events
+python-dateutil
