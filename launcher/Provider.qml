@@ -31,13 +31,79 @@ QtObject {
     // or starts with `prefix + " "` (e.g. "f foo"). Empty = always active.
     property string prefix: ""
 
+    // Drill-in shortcuts. When the launcher is in menu mode and the
+    // user types `<shortcut> <rest>` (or just `<shortcut> `), it
+    // enters this provider with `<rest>` as the initial query. Useful
+    // for keyboard-only navigation. Each shortcut is matched
+    // case-insensitively. Empty list = no shortcuts.
+    property list<string> shortcuts: []
+
+    // Optional override of the search placeholder when in this provider.
+    // Useful for providers with internal sub-views (e.g. Style → Theme).
+    // When empty, the launcher falls back to `name`.
+    property string currentTitle: ""
+
+    // Optional override for the empty-state message shown in the right
+    // pane when `results` is empty. Use this for loading / error states
+    // (e.g. "Loading PRs…" while a `gh` call is in flight). When empty,
+    // the launcher uses its default "Start typing…" / "No results".
+    property string emptyStateText: ""
+
+    // Optional: opt-in to a side-by-side details pane in the right area.
+    // When true, the launcher splits the results pane: list on the left,
+    // details on the right. The provider writes `detail` (see schema in
+    // DetailsPane.qml) and observes `selectedRow` to know what to fetch.
+    property bool detailsEnabled: false
+    property int detailWidth: 380         // px reserved for the details pane
+    // Provider populates this with the loaded detail (see DetailsPane.qml
+    // for the expected shape). Empty / null = nothing selected.
+    property var detail: null
+    // Launcher writes the raw provider result (`r`, as returned by
+    // search()) of the currently highlighted row whenever the selection
+    // changes. Providers should override `onSelectedRowChanged` to fetch
+    // details for that row.
+    property var selectedRow: null
+
+    // Optional: providers (or their sub-views) can request a different
+    // popup width/height. 0 means "use the launcher default". The
+    // launcher animates between values so changing these on a view
+    // switch is fine.
+    property int requestedWidth: 0
+    property int requestedHeight: 0
+
+    // Optional: how the launcher should render this provider's results
+    // in the right pane.
+    //   "list" — vertical list of rows (default; uses ResultDelegate)
+    //   "grid" — tiled cells with preview + label (uses ResultGridCell)
+    property string resultsLayout: "list"
+
+    // Grid params — read only when resultsLayout === "grid".
+    property int gridColumns: 4
+    property int cellHeight: 160
+
     // ── Wiring ───────────────────────────────────────────────────────────
     property string query: ""       // set by Launcher
     property var results: []        // populated by subclass
 
+    // Emitted by providers that manage internal sub-views, when they push
+    // or pop a view. The launcher listens and clears the search query so
+    // each view starts fresh.
+    signal viewChanged()
+
     // ── Contract (override in subclass) ──────────────────────────────────
     function search(text) {}
     function activate(result) {}
+
+    // Optional: providers with internal sub-views override this. Return
+    // true when the back was handled internally (the launcher then just
+    // refreshes results); return false to let the launcher exit the
+    // provider and return to the category menu.
+    function goBack() { return false }
+
+    // Optional: clear any internal sub-view state. Called by the launcher
+    // when it returns to the category menu or closes, so the next
+    // drill-in starts at the provider's root view.
+    function reset() {}
 
     // ── Helpers (do not override) ────────────────────────────────────────
 

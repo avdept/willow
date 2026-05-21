@@ -3,33 +3,60 @@
 Each provider is a QML file in this dir that inherits `Provider` (see
 `Provider.qml`). To wire one up, drop the file in here, then:
 
-1. add a `<Name>Provider { id: <id>; onResultsChanged: launcher._aggregate() }`
-   line inside `Launcher.qml` next to the existing providers,
-2. include `<id>` in the `providers = [...]` array in `Component.onCompleted`.
+1. add an instance to `Launcher.qml` next to the existing providers,
+   forwarding `onResultsChanged` (and any other signals the provider
+   raises — e.g. `onViewChanged`, `onDetailChanged`) to the launcher,
+2. include its id in the `providers = [...]` array in
+   `Component.onCompleted`.
 
-The provider contract (read `Provider.qml` for full details):
+Core provider contract (read `Provider.qml` for full details):
 
-- `name`, `tag`, `iconText` — identity. `tag` is shown on each row.
-- `prefix` — empty = always-on; otherwise the provider only runs when the
-  query is exactly `<prefix>` or starts with `<prefix> ` (e.g. `pr foo` for
-  GitHub PRs).
+- `name`, `tag`, `iconText`, `description` — identity. `tag` is shown
+  on each row's pill; `description` is the subtitle in the top menu.
+- `prefix` — empty = always-on; otherwise the provider only runs when
+  the query is exactly `<prefix>` or starts with `<prefix> ` (e.g.
+  `f foo` for files).
 - `search(text)` — called when the (effective, prefix-stripped) query
-  changes. Update `results` (a JS array of `{title, subtitle, iconName,
-  iconPath, iconText, score, data}` objects).
+  changes. Update `results` with objects shaped like:
+  `{ title, subtitle, iconUrl, iconText, providerTag, tagColor,
+  titleFont, score, data }`. Everything except `title` and `score` is
+  optional. `tagColor` is one of `"success" | "info" | "purple" |
+  "warn" | "danger" | "cyan" | "accent"`; missing = muted default.
 - `activate(result)` — called when the user picks this row.
+
+Opt-in extensions:
+
+- **Internal sub-views** — set `view`/`currentTitle` from `_setView()`,
+  emit `viewChanged()`, override `goBack()` and `reset()`.
+- **Custom layout** — set `resultsLayout: "grid"` plus `gridColumns` /
+  `cellHeight` to render a tiled grid (e.g. theme picker).
+- **Wider/taller popup** — set `requestedWidth` / `requestedHeight`.
+  Clamped to `maxWidthRatio`/`maxHeightRatio` of the screen.
+- **Side-by-side details pane** — set `detailsEnabled: true` and
+  `detailWidth`, observe `selectedRow`, push a `detail` blob shaped per
+  `DetailsPane.qml`.
 
 Higher `score` ranks higher in the merged list. Use ~1000 for "perfect
 match", ~500 for prefix, ~100 for substring, ~20 for fuzzy.
 
 ---
 
-## v1 (shipped)
+## Shipped
 
 - **AppsProvider** — `.desktop` apps via `Quickshell.DesktopEntries`.
   Always-on. Fuzzy scoring: exact > prefix > word-initials > substring >
-  subsequence. Activation calls `entry.execute()`.
+  subsequence. Activation runs the entry via `uwsm-app`.
 - **FilesProvider** — `fd`-backed file search. Prefix `f `. Debounced
   180ms. Activation opens via `xdg-open`.
+- **StyleProvider** — wraps the omarchy "Style" menu. Drills into
+  internal sub-views (Theme grid with preview images, Font list rendered
+  in each font's own family, Unlock plymouth picker). Uses the launcher's
+  internal sub-view machinery (`goBack()` / `reset()`).
+- **GithubProvider** — flat search of your PRs, issues, projects, and
+  repos via `gh`. Tag pills color-code each kind (green/yellow/purple/
+  blue). Owner avatars via `https://github.com/<login>.png`. Opts into
+  the side-by-side details pane (PR/issue body, repo stats, …) with a
+  per-URL detail cache. Activation opens the item URL via `xdg-open`.
 
 ---
 
@@ -48,8 +75,6 @@ skeleton/contract is the same for each.
   (`0-9 + - * / . ( ) ^ %`).
 - **Activate**: copy the result to the clipboard via `wl-copy`.
 - **Score**: ~10000 (always tops the list when active).
-- **Open question**: do we want unit conversion / variable assignment
-  shown inline?
 
 ### SystemProvider — power / session actions
 
@@ -63,18 +88,6 @@ skeleton/contract is the same for each.
   - logout → `uwsm stop` (or `hyprctl dispatch exit`)
 - **Open question**: confirmation dialog for shutdown/reboot? Or trust
   the user (it's a launcher)?
-
-### GithubProvider — pull requests via `gh` CLI
-
-- **Trigger**: prefix `pr ` (or `gh `).
-- **Backend**: spawn `gh pr list --json number,title,url,author,state,repository --limit 30`
-  on first activation; cache for 60s. On `pr foo`, fuzzy-match locally
-  against the cached list. Also expose:
-  - `pr review` — `gh pr list --search "review-requested:@me" --json ...`
-  - `pr mine`   — `gh pr list --author @me ...`
-- **Activate**: `xdg-open <url>`.
-- **Open question**: scope to current repo when invoked inside one, or
-  always cross-repo? Show drafts?
 
 ### ClipboardProvider — cliphist history
 

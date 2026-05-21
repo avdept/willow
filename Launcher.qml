@@ -1,11 +1,14 @@
 // Launcher — floating, layer-shell window with a search input and a
-// two-pane body: the categories list on the left, and (after drilling in)
-// the active provider's results on the right.
+// layered body:
 //
-// In menu mode the categories list spans the full body width. When the user
-// drills into a category, the categories list shrinks to icon-only width
-// (its right edge slides leftward, sweeping over each row's name/chevron)
-// and the provider-results list animates in to fill the remaining space.
+//   • menu mode: the categories list spans the full body width.
+//   • provider mode: the categories list shrinks to an icon-only rail on
+//     the left, the active provider's results fill the rest. If the
+//     provider opted into `detailsEnabled`, a third pane appears on the
+//     right showing per-selection details (DetailsPane.qml).
+//
+// The categories-list right edge animates between modes (slides left on
+// drill-in), and the card width/height animate with provider requests.
 //
 // Open / close via IPC:
 //   qs ipc call launcher toggle
@@ -32,18 +35,34 @@ PanelWindow {
     required property string fontFamily
 
     // ── Layout constants ─────────────────────────────────────────────────
-    readonly property int cardWidth: 640
-    readonly property int cardHeight: 460
-    readonly property int searchRowHeight: 56
-    readonly property int footerHeight: 28
-    readonly property int dividerHeight: 1
-    readonly property int categoryRailWidth: 64       // narrowed-categories width
+    readonly property int defaultCardWidth:  640
+    readonly property int defaultCardHeight: 560
+    readonly property int searchRowHeight:   56
+    readonly property int footerHeight:      28
+    readonly property int dividerHeight:     1
+    readonly property int categoryRailWidth: 64      // narrowed-categories width
     readonly property int collapseAnimDuration: 260
+    // Hard caps as a fraction of the screen (the launcher window covers
+    // the whole screen, so width/height are the screen dimensions).
+    // Anything a provider requests is clamped down to these.
+    readonly property real maxWidthRatio:  0.70
+    readonly property real maxHeightRatio: 0.80
+    // Card background alpha (1.0 = opaque). Affects the popup card only,
+    // not the layer-shell parent (which is always transparent).
+    readonly property real cardAlpha: 0.95
+
+    // Animated card size — bound below to either the defaults or the
+    // active provider's `requestedWidth` / `requestedHeight`, clamped.
+    property int cardWidth: defaultCardWidth
+    property int cardHeight: defaultCardHeight
 
     // Animated width of the categories pane. Body width in menu mode (full),
     // categoryRailWidth in provider mode. Its right edge is the visible
     // divider that slides from right to left when drilling in.
     property real categoryListWidth: cardWidth        // overridden by binding below
+
+    function _clampWidth(req)  { return Math.min(req, Math.round(width  * maxWidthRatio));  }
+    function _clampHeight(req) { return Math.min(req, Math.round(height * maxHeightRatio)); }
 
     // ── State ────────────────────────────────────────────────────────────
     property bool open: false
@@ -66,6 +85,10 @@ PanelWindow {
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: open ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
+    // Namespace lets Hyprland match a `layerrule = blur, …` so the
+    // compositor can backdrop-blur what's behind the popup. Pair this
+    // with `cardAlpha < 1.0` to actually see the blur.
+    WlrLayershell.namespace: "quickshell-launcher"
     color: "transparent"
     visible: open
 
@@ -80,9 +103,24 @@ PanelWindow {
     // ── Providers ────────────────────────────────────────────────────────
     AppsProvider  { id: appsProv;  onResultsChanged: launcher._onProviderResults(0) }
     FilesProvider { id: filesProv; onResultsChanged: launcher._onProviderResults(1) }
+    StyleProvider {
+        id: styleProv
+        onResultsChanged: launcher._onProviderResults(2)
+        onViewChanged: if (launcher.activeProvIdx === 2) launcher._onProviderViewChanged()
+    }
+    GithubProvider {
+        id: ghProv
+        onResultsChanged: launcher._onProviderResults(3)
+        onDetailChanged:  launcher._onProviderDetailChanged(3)
+        // The provider flips `detailsEnabled` async after its `gh auth`
+        // probe lands; re-sync the launcher's layout if we're showing
+        // this category at that moment. (cardWidth is bound to
+        // `requestedWidth` directly, so it doesn't need a handler.)
+        onDetailsEnabledChanged: if (launcher.activeProvIdx === 3) launcher._syncRightLayout()
+    }
 
     Component.onCompleted: {
-        providers = [appsProv, filesProv];
+        providers = [appsProv, filesProv, styleProv, ghProv];
         _computeLeft();
     }
 
@@ -105,23 +143,50 @@ PanelWindow {
         queryText = "";
         currentIndex = 0;
         rightModel = [];
+        for (let i = 0; i < providers.length; i++)
+            if (providers[i] && providers[i].reset) providers[i].reset();
+        _syncRightLayout();
     }
 
     function enterProvider(displayIdx) {
         if (mode !== "menu" || displayIdx < 0 || displayIdx >= leftModel.length) return;
         const item = leftModel[displayIdx];
         if (!item.chevron) return;        // aggregated result, not a category
-        const provIdx = item._provIdx;
+        enterProviderById(item._provIdx, "");
+    }
+
+    // Drill into a provider directly (used by category clicks and by
+    // typed-shortcut detection — see onQueryTextChanged below).
+    function enterProviderById(provIdx, initialQuery) {
         const p = providers[provIdx];
         if (!p) return;
         activeProvIdx = provIdx;
         mode = "provider";
-        queryText = "";
+        queryText = initialQuery || "";
         currentIndex = 0;
-        p.query = "";
+        p.query = queryText;
         p.refresh();
+        _syncRightLayout();
         _computeLeft();                   // rebuild left as static category list
         _refreshProviderResults();
+    }
+
+    // Returns { provIdx, rest } if `text` starts with one of any
+    // provider's `shortcuts` followed by a space; otherwise null.
+    function _matchShortcut(text) {
+        const lc = (text || "").toLowerCase();
+        for (let i = 0; i < providers.length; i++) {
+            const p = providers[i];
+            const list = p ? p.shortcuts : null;
+            if (!list) continue;
+            for (let j = 0; j < list.length; j++) {
+                const sc = (list[j] || "").toLowerCase();
+                if (sc.length === 0) continue;
+                if (lc.startsWith(sc + " "))
+                    return { provIdx: i, rest: text.slice(sc.length + 1) };
+            }
+        }
+        return null;
     }
 
     function switchToCategory(provIdx) {
@@ -133,6 +198,7 @@ PanelWindow {
         currentIndex = 0;
         p.query = "";
         p.refresh();
+        _syncRightLayout();
         _refreshProviderResults();
     }
 
@@ -142,38 +208,121 @@ PanelWindow {
     }
 
     function goBack() {
-        if (mode === "provider") backToMenu();
-        else hide();
+        if (mode === "provider") {
+            // Let the active provider pop any internal sub-view first.
+            const p = providers[activeProvIdx];
+            if (p && p.goBack && p.goBack()) return;
+            backToMenu();
+        } else {
+            hide();
+        }
     }
 
     function activateCurrent() {
         const model = activeModel;
         if (currentIndex < 0 || currentIndex >= model.length) return;
         const item = model[currentIndex];
-        if (item.chevron) { enterProvider(currentIndex); return; }
+        // In menu mode a chevron row is a category — drill in.
+        if (mode === "menu" && item.chevron) { enterProvider(currentIndex); return; }
         const p = providers[item._provIdx];
         if (p && item._result) p.activate(item._result);
-        hide();
+        // Chevron rows inside a provider are sub-sections (e.g. Style →
+        // Theme). The provider switches view; keep the launcher open.
+        if (!item.chevron) hide();
     }
+
+    // Active layout for the right pane. Set explicitly via
+    // `_syncRightLayout()` whenever the active provider or its view
+    // changes, since binding through `providers[activeProvIdx]` isn't a
+    // reliable property-change dependency for QML's binding engine.
+    property string rightLayout: "list"
+    property int rightGridColumns: 1
+    property int rightCellHeight: 160
+    // Details-pane support — true when the active provider opts in.
+    property bool detailsEnabled: false
+    property int detailsWidth: 0
+    // Mirrors active provider's `detail`, set explicitly via the
+    // provider's onDetailChanged handler. Going through this stable
+    // property avoids relying on `providers[activeProvIdx].detail` —
+    // QML binding tracking through a `var` array lookup is unreliable.
+    property var currentDetail: null
+
+    function _syncRightLayout() {
+        if (mode !== "provider") {
+            rightLayout = "list";
+            rightGridColumns = 1;
+            detailsEnabled = false;
+            detailsWidth = 0;
+            currentDetail = null;
+            return;
+        }
+        const p = providers[activeProvIdx];
+        if (!p) { rightLayout = "list"; rightGridColumns = 1; detailsEnabled = false; detailsWidth = 0; currentDetail = null; return; }
+        rightLayout      = p.resultsLayout === "grid" ? "grid" : "list";
+        rightGridColumns = Math.max(1, p.gridColumns || 4);
+        rightCellHeight  = Math.max(1, p.cellHeight  || 160);
+        detailsEnabled   = p.detailsEnabled === true;
+        detailsWidth     = detailsEnabled ? Math.max(200, p.detailWidth || 380) : 0;
+        currentDetail    = detailsEnabled ? p.detail : null;
+    }
+
+    // The active provider just pushed a new `detail` blob.
+    function _onProviderDetailChanged(idx) {
+        if (idx === activeProvIdx && detailsEnabled)
+            currentDetail = providers[idx]?.detail ?? null;
+    }
+
+    // Whenever the highlighted result changes inside a details-enabled
+    // provider, push the raw row data into the provider so it can fetch.
+    function _syncSelectedRow() {
+        if (!detailsEnabled || mode !== "provider") return;
+        const p = providers[activeProvIdx];
+        if (!p) return;
+        const m = rightModel;
+        if (currentIndex < 0 || currentIndex >= m.length) { p.selectedRow = null; return; }
+        p.selectedRow = m[currentIndex]?._result ?? null;
+    }
+
+    onCurrentIndexChanged: _syncSelectedRow()
+    onRightModelChanged:   _syncSelectedRow()
+    onDetailsEnabledChanged: _syncSelectedRow()
 
     function moveSelection(delta) {
         const n = activeModel.length;
         if (n === 0) return;
         currentIndex = ((currentIndex + delta) % n + n) % n;
-        const list = mode === "provider" ? rightList : leftList;
-        list.positionViewAtIndex(currentIndex, ListView.Contain);
+        if (mode === "provider") {
+            if (rightLayout === "grid") rightGrid.positionViewAtIndex(currentIndex, GridView.Contain);
+            else                        rightList.positionViewAtIndex(currentIndex, ListView.Contain);
+        } else {
+            leftList.positionViewAtIndex(currentIndex, ListView.Contain);
+        }
     }
 
     // ── Model construction ───────────────────────────────────────────────
 
     function _resultRow(provIdx, p, r) {
+        const isChev = r.chevron === true;
         return {
             title:       r.title,
             subtitle:    r.subtitle,
             iconUrl:     r.iconUrl,
             iconText:    r.iconText || p.iconText,
-            providerTag: r.providerTag ?? p.tag,           // result may override
-            chevron:     false,
+            // Chevron rows in provider results (e.g. Style → Theme) are
+            // sub-section entries — render them as menu rows, not tagged
+            // results.
+            providerTag: isChev ? "" : (r.providerTag ?? p.tag),
+            chevron:     isChev,
+            // Optional per-row override for the title's font family
+            // (e.g. the Font picker renders each name in its own font).
+            // "" means use the launcher's default font.
+            titleFont:   r.titleFont || "",
+            // Optional pill color name — see ResultDelegate for the
+            // supported strings. "" = muted default.
+            tagColor:    r.tagColor || "",
+            // Provider-private payload — read by grid delegates (e.g. to
+            // mark the current theme) and dispatched back to `activate()`.
+            data:        r.data,
             _provIdx:    provIdx,
             _result:     r,
             _score:      r.score ?? 0
@@ -234,9 +383,27 @@ PanelWindow {
         else if (mode === "menu" && queryText.length > 0) _computeLeft();
     }
 
+    // A provider with internal sub-views just switched view — clear the
+    // query so the new view starts empty, and re-fetch its results.
+    function _onProviderViewChanged() {
+        queryText = "";
+        currentIndex = 0;
+        const p = providers[activeProvIdx];
+        if (p) {
+            p.query = "";
+            p.refresh();
+        }
+        _syncRightLayout();
+        _refreshProviderResults();
+    }
+
     onQueryTextChanged: {
         currentIndex = 0;
         if (mode === "menu") {
+            // Typed-shortcut drill-in: "<sc> <rest>" auto-enters that
+            // provider with `<rest>` as the initial query.
+            const sc = _matchShortcut(queryText);
+            if (sc) { enterProviderById(sc.provIdx, sc.rest); return; }
             if (queryText.length > 0) {
                 for (let i = 0; i < providers.length; i++)
                     if (providers[i]) providers[i].query = queryText;
@@ -265,12 +432,14 @@ PanelWindow {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
         anchors.topMargin: Math.max(64, parent.height * 0.18)
-        color: launcher.theme.bg
+        color: Qt.rgba(launcher.theme.bg.r, launcher.theme.bg.g, launcher.theme.bg.b, launcher.cardAlpha)
         border.color: launcher.theme.border
         border.width: 1
 
         opacity: launcher.open ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+        Behavior on width  { NumberAnimation { duration: launcher.collapseAnimDuration; easing.type: Easing.OutCubic } }
+        Behavior on height { NumberAnimation { duration: launcher.collapseAnimDuration; easing.type: Easing.OutCubic } }
 
         layer.enabled: true
         layer.effect: MultiEffect {
@@ -290,6 +459,32 @@ PanelWindow {
             target: launcher
             property: "categoryListWidth"
             value: launcher.mode === "provider" ? launcher.categoryRailWidth : body.width
+        }
+
+        // Drive cardWidth/cardHeight: the active provider may request a
+        // wider or taller popup (e.g. Style → Theme wants room for a
+        // preview grid). The Behaviors below keep the resize smooth.
+        Binding {
+            target: launcher
+            property: "cardWidth"
+            value: {
+                const def = launcher.defaultCardWidth;
+                if (launcher.mode !== "provider") return launcher._clampWidth(def);
+                const p = launcher.providers[launcher.activeProvIdx];
+                const req = p ? p.requestedWidth : 0;
+                return launcher._clampWidth(req > 0 ? req : def);
+            }
+        }
+        Binding {
+            target: launcher
+            property: "cardHeight"
+            value: {
+                const def = launcher.defaultCardHeight;
+                if (launcher.mode !== "provider") return launcher._clampHeight(def);
+                const p = launcher.providers[launcher.activeProvIdx];
+                const req = p ? p.requestedHeight : 0;
+                return launcher._clampHeight(req > 0 ? req : def);
+            }
         }
 
         Column {
@@ -330,9 +525,14 @@ PanelWindow {
                     Text {
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.left: parent.left
-                        text: launcher.mode === "menu"
-                            ? "Search apps, files, …"
-                            : ("Search " + (launcher.providers[launcher.activeProvIdx]?.name ?? "") + "…")
+                        text: {
+                            if (launcher.mode === "menu") return "Search apps, files, …";
+                            const p = launcher.providers[launcher.activeProvIdx];
+                            const label = (p?.currentTitle && p.currentTitle.length > 0)
+                                ? p.currentTitle
+                                : (p?.name ?? "");
+                            return "Search " + label + "…";
+                        }
                         color: launcher.theme.subFg
                         font: parent.font
                         opacity: 0.5
@@ -340,17 +540,33 @@ PanelWindow {
                     }
 
                     Keys.onPressed: function (event) {
+                        // In grid layout, Up/Down jump by a full row and
+                        // Left/Right step through cells. In list layout,
+                        // Left/Right pass through to the text cursor.
+                        const cols  = launcher.rightLayout === "grid" ? launcher.rightGridColumns : 1;
                         switch (event.key) {
-                        case Qt.Key_Escape:    launcher.goBack();          event.accepted = true; break;
+                        case Qt.Key_Escape:    launcher.goBack();              event.accepted = true; break;
                         case Qt.Key_Return:
-                        case Qt.Key_Enter:     launcher.activateCurrent(); event.accepted = true; break;
-                        case Qt.Key_Down:      launcher.moveSelection(1);  event.accepted = true; break;
-                        case Qt.Key_Up:        launcher.moveSelection(-1); event.accepted = true; break;
-                        case Qt.Key_PageDown:  launcher.moveSelection(5);  event.accepted = true; break;
-                        case Qt.Key_PageUp:    launcher.moveSelection(-5); event.accepted = true; break;
+                        case Qt.Key_Enter:     launcher.activateCurrent();     event.accepted = true; break;
+                        case Qt.Key_Down:      launcher.moveSelection(cols);   event.accepted = true; break;
+                        case Qt.Key_Up:        launcher.moveSelection(-cols);  event.accepted = true; break;
+                        case Qt.Key_Right:
+                            if (launcher.rightLayout === "grid") {
+                                launcher.moveSelection(1); event.accepted = true;
+                            }
+                            break;
+                        case Qt.Key_Left:
+                            if (launcher.rightLayout === "grid") {
+                                launcher.moveSelection(-1); event.accepted = true;
+                            }
+                            break;
+                        case Qt.Key_PageDown:  launcher.moveSelection(cols*5);  event.accepted = true; break;
+                        case Qt.Key_PageUp:    launcher.moveSelection(-cols*5); event.accepted = true; break;
                         case Qt.Key_Backspace:
+                            // Empty query inside a provider — navigate back
+                            // (provider sub-view first, then the menu).
                             if (launcher.mode === "provider" && searchField.text.length === 0) {
-                                launcher.backToMenu();
+                                launcher.goBack();
                                 event.accepted = true;
                             }
                             break;
@@ -440,12 +656,17 @@ PanelWindow {
                     visible: launcher.mode === "provider"
                 }
 
-                // Provider results pane — empty/hidden in menu mode.
+                // Provider results pane — list layout (default).
+                // When `detailsEnabled`, the right edge shrinks by
+                // detailsWidth + divider, leaving room for the details pane.
                 ListView {
                     id: rightList
                     anchors.left: leftList.right
                     anchors.leftMargin: launcher.dividerHeight
                     anchors.right: parent.right
+                    anchors.rightMargin: launcher.detailsEnabled
+                        ? (launcher.detailsWidth + launcher.dividerHeight)
+                        : 0
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
                     clip: true
@@ -454,7 +675,7 @@ PanelWindow {
                     topMargin: 6
                     bottomMargin: 6
                     boundsBehavior: Flickable.StopAtBounds
-                    visible: launcher.mode === "provider"
+                    visible: launcher.mode === "provider" && launcher.rightLayout === "list"
 
                     delegate: ResultDelegate {
                         width: ListView.view.width - 12
@@ -474,13 +695,91 @@ PanelWindow {
 
                     Text {
                         anchors.centerIn: parent
+                        width: parent.width - 32
+                        wrapMode: Text.WordWrap
+                        horizontalAlignment: Text.AlignHCenter
                         visible: launcher.rightModel.length === 0
-                        text: launcher.queryText.length === 0 ? "Start typing…" : "No results"
+                        text: {
+                            const p = launcher.providers[launcher.activeProvIdx];
+                            if (p && p.emptyStateText && p.emptyStateText.length > 0)
+                                return p.emptyStateText;
+                            return launcher.queryText.length === 0 ? "Start typing…" : "No results";
+                        }
                         color: launcher.theme.subFg
                         font.family: launcher.fontFamily
                         font.pixelSize: 13
                         opacity: 0.7
                     }
+                }
+
+                // Provider results pane — grid layout (e.g. Theme picker).
+                GridView {
+                    id: rightGrid
+                    anchors.left: leftList.right
+                    anchors.leftMargin: launcher.dividerHeight
+                    anchors.right: parent.right
+                    anchors.rightMargin: launcher.detailsEnabled
+                        ? (launcher.detailsWidth + launcher.dividerHeight)
+                        : 0
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    clip: true
+                    model: launcher.rightModel
+                    topMargin: 6
+                    bottomMargin: 6
+                    boundsBehavior: Flickable.StopAtBounds
+                    visible: launcher.mode === "provider" && launcher.rightLayout === "grid"
+
+                    cellWidth: Math.max(1, Math.floor(width / launcher.rightGridColumns))
+                    cellHeight: launcher.rightCellHeight
+
+                    delegate: ResultGridCell {
+                        width:  rightGrid.cellWidth
+                        height: rightGrid.cellHeight
+                        currentIndex: launcher.mode === "provider" ? launcher.currentIndex : -1
+                        theme: launcher.theme
+                        fontFamily: launcher.fontFamily
+                        onActivated: function (i) {
+                            launcher.currentIndex = i;
+                            launcher.activateCurrent();
+                        }
+                        onHovered: function (i) {
+                            if (launcher.mode === "provider" && launcher.currentIndex !== i)
+                                launcher.currentIndex = i;
+                        }
+                    }
+
+                    Text {
+                        anchors.centerIn: parent
+                        visible: launcher.rightModel.length === 0
+                        text: launcher.queryText.length === 0 ? "Loading…" : "No results"
+                        color: launcher.theme.subFg
+                        font.family: launcher.fontFamily
+                        font.pixelSize: 13
+                        opacity: 0.7
+                    }
+                }
+
+                // ── Details pane (opt-in via Provider.detailsEnabled) ────
+                Rectangle {
+                    id: detailsDivider
+                    width: launcher.dividerHeight
+                    height: parent.height
+                    anchors.right: detailsPane.left
+                    color: launcher.theme.border
+                    visible: launcher.detailsEnabled
+                }
+
+                DetailsPane {
+                    id: detailsPane
+                    width: launcher.detailsWidth
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    visible: launcher.detailsEnabled
+                    theme: launcher.theme
+                    fontFamily: launcher.fontFamily
+                    detail: launcher.currentDetail
                 }
             }
 

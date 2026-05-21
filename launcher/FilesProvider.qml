@@ -12,6 +12,7 @@ Provider {
     tag: "file"
     iconText: "󰉋"
     description: "Search files in your home directory"
+    shortcuts: ["f", "files"]
 
     property int maxResults: 12
     property int debounceMs: 180
