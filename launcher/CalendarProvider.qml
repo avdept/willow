@@ -53,9 +53,12 @@ Provider {
 
     function selectEvent(ev) { selectedEvent = ev; }
 
+    // Qt.callLater dedupes calls scheduled in the same event-loop tick,
+    // so going Dec → Jan (both displayedMonth and displayedYear fire)
+    // only triggers one Python spawn instead of two.
     Component.onCompleted: _refreshEvents()
-    onDisplayedMonthChanged: _refreshEvents()
-    onDisplayedYearChanged:  _refreshEvents()
+    onDisplayedMonthChanged: Qt.callLater(_refreshEvents)
+    onDisplayedYearChanged:  Qt.callLater(_refreshEvents)
 
     function _refreshEvents() {
         // Window covers the visible 6×7 grid: pad the displayed month by

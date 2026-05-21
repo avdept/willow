@@ -51,6 +51,49 @@ def _iso(dt):
     return dt.isoformat()  # date — "YYYY-MM-DD"
 
 
+def _person(value):
+    """Normalise a vCalAddress (ATTENDEE / ORGANIZER) to a plain dict.
+
+    Returns None when the value can't be read. Output keys:
+      { name, email, status, role }
+    `status` is the PARTSTAT (NEEDS-ACTION / ACCEPTED / DECLINED /
+    TENTATIVE / DELEGATED) — meaningful for attendees, "" for organizer.
+    """
+    if value is None:
+        return None
+    try:
+        raw = str(value)
+    except Exception:
+        return None
+    email = raw[len("mailto:"):] if raw.lower().startswith("mailto:") else raw
+    params = getattr(value, "params", {}) or {}
+    name = str(params.get("CN", "")).strip() or email
+    return {
+        "name":   name,
+        "email":  email,
+        "status": str(params.get("PARTSTAT", "")).upper(),
+        "role":   str(params.get("ROLE", "")).upper(),
+    }
+
+
+def _attendees(ev):
+    raw = ev.get("ATTENDEE")
+    if not raw:
+        return []
+    if not isinstance(raw, list):
+        raw = [raw]
+    out = []
+    for a in raw:
+        p = _person(a)
+        if p:
+            out.append(p)
+    return out
+
+
+def _organizer(ev):
+    return _person(ev.get("ORGANIZER"))
+
+
 def _scan_calendar(cal_dir: Path, start: date, end: date):
     """Yield event dicts for every .ics file under one calendar dir."""
     color_file = cal_dir / "color"
@@ -91,6 +134,8 @@ def _scan_calendar(cal_dir: Path, start: date, end: date):
                 "color":       color,
                 "location":    str(ev.get("LOCATION", "")),
                 "description": str(ev.get("DESCRIPTION", "")),
+                "organizer":   _organizer(ev),
+                "attendees":   _attendees(ev),
             }
 
 

@@ -123,6 +123,50 @@ backends (iCloud, Fastmail, Nextcloud, …); the local storage type
 stays the same `filesystem`, just point each pair at its own
 sub-directory under `calendars/`.
 
+### Multi-account (e.g. a second Google account)
+
+Each account needs its own pair, its own `token_file`, and its own
+local sub-directory — otherwise the OAuth refresh tokens collide and
+the two accounts' calendar directories overlap. You can reuse the
+same `client_id` / `client_secret` from § 2 (those identify your
+Google Cloud project, not the user).
+
+Append to `~/.config/vdirsyncer/config`:
+
+```ini
+[storage work_remote]
+type = "google_calendar"
+token_file = "~/.config/vdirsyncer/work_token"     # MUST differ from the first account's token_file
+client_id = "<same as the first account>"
+client_secret = "<same as the first account>"
+
+[storage work_local]
+type = "filesystem"
+path = "~/.local/share/vdirsyncer/calendars/work/" # MUST differ from the first account's path
+fileext = ".ics"
+
+[pair work]
+a = "work_remote"
+b = "work_local"
+collections = ["from a", "from b"]
+conflict_resolution = "a wins"
+metadata = ["displayname", "color"]
+```
+
+Then bring the new pair online — pass the pair name so vdirsyncer
+only re-auths the new account, not all existing ones:
+
+```bash
+vdirsyncer discover work     # browser opens; sign in with the second account
+vdirsyncer sync work         # initial pull just for this pair
+vdirsyncer sync              # subsequent runs sync everything
+```
+
+The launcher's helper picks the new emails up automatically — it
+scans every `calendars/*/<dir>/` whose name looks like an email and
+treats each as one of "you", so RSVP works across accounts with no
+further config.
+
 ---
 
 ## 4. First-time discovery + sync

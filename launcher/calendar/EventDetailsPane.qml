@@ -53,6 +53,27 @@ Item {
             .replace(/\n/g, "<br>");
     }
 
+    // PARTSTAT → glyph + colour. Used by the Attendees list.
+    function _statusGlyph(s) {
+        switch ((s || "").toUpperCase()) {
+        case "ACCEPTED":  return "✓";
+        case "DECLINED":  return "✗";
+        case "TENTATIVE": return "?";
+        case "DELEGATED": return "→";
+        default:          return "·";        // NEEDS-ACTION / unknown
+        }
+    }
+    function _statusColor(s) {
+        if (!pane.theme) return "#888";
+        switch ((s || "").toUpperCase()) {
+        case "ACCEPTED":  return pane.theme.success;
+        case "DECLINED":  return pane.theme.danger;
+        case "TENTATIVE": return pane.theme.warn;
+        case "DELEGATED": return pane.theme.info;
+        default:          return pane.theme.subFg;
+        }
+    }
+
     function _whenLine() {
         if (!_hasEvent) return "";
         if (event.allDay) {
@@ -147,17 +168,22 @@ Item {
             }
         }
 
-        // Metadata rows.
+        // Metadata rows — each is `<glyph>  <value>` with the glyph in
+        // subFg and the value either in fg (primary) or subFg (muted,
+        // for the calendar source).
         Column {
             width: parent.width
             spacing: 6
 
-            // When / time range
-            Row {
+            component MetadataRow : Row {
+                property string glyph: ""
+                property string value: ""
+                property bool muted: false
                 spacing: 8
                 width: parent.width
+                visible: value.length > 0
                 Text {
-                    text: "󰃭"
+                    text: parent.glyph
                     color: pane.theme ? pane.theme.subFg : "#888"
                     font.family: pane.fontFamily
                     font.pixelSize: 14
@@ -165,59 +191,98 @@ Item {
                     horizontalAlignment: Text.AlignHCenter
                 }
                 Text {
-                    text: pane._whenLine()
-                    color: pane.theme ? pane.theme.fg : "#000"
+                    text: parent.value
+                    color: parent.muted
+                        ? (pane.theme ? pane.theme.subFg : "#888")
+                        : (pane.theme ? pane.theme.fg : "#000")
                     font.family: pane.fontFamily
                     font.pixelSize: 12
                     width: parent.width - 26
-                    wrapMode: Text.WordWrap
+                    wrapMode: parent.muted ? Text.NoWrap : Text.WordWrap
+                    elide: parent.muted ? Text.ElideRight : Text.ElideNone
                 }
             }
 
-            Row {
-                spacing: 8
-                width: parent.width
-                visible: pane._hasEvent
-                    && (pane.event.location || "").length > 0
-                Text {
-                    text: ""
-                    color: pane.theme ? pane.theme.subFg : "#888"
-                    font.family: pane.fontFamily
-                    font.pixelSize: 14
-                    width: 18
-                    horizontalAlignment: Text.AlignHCenter
-                }
-                Text {
-                    text: pane._hasEvent ? (pane.event.location || "") : ""
-                    color: pane.theme ? pane.theme.fg : "#000"
-                    font.family: pane.fontFamily
-                    font.pixelSize: 12
-                    width: parent.width - 26
-                    wrapMode: Text.WordWrap
+            MetadataRow {
+                glyph: "󰃭"
+                value: pane._hasEvent ? pane._whenLine() : ""
+            }
+            MetadataRow {
+                glyph: ""
+                value: pane._hasEvent ? (pane.event.location || "") : ""
+            }
+            MetadataRow {
+                glyph: ""
+                value: pane._hasEvent ? (pane.event.calendar || "") : ""
+                muted: true
+            }
+        }
+
+        // Attendees — visible whenever the event has any. Capped at 8
+        // visible rows; the rest fold into "+N more". Organizer is
+        // tagged inline.
+        Column {
+            width: parent.width
+            spacing: 4
+            visible: pane._hasEvent
+                && (pane.event.attendees || []).length > 0
+
+            readonly property var _all: pane._hasEvent ? (pane.event.attendees || []) : []
+            readonly property int _maxVisible: 8
+            readonly property string _organizerEmail:
+                pane._hasEvent && pane.event.organizer
+                    ? (pane.event.organizer.email || "")
+                    : ""
+
+            Text {
+                text: "Attendees (" + parent._all.length + ")"
+                color: pane.theme ? pane.theme.subFg : "#888"
+                font.family: pane.fontFamily
+                font.pixelSize: 11
+                font.bold: true
+                font.capitalization: Font.AllUppercase
+                font.letterSpacing: 0.5
+            }
+
+            Repeater {
+                model: parent._all.slice(0, parent._maxVisible)
+                delegate: Row {
+                    required property var modelData
+                    width: parent.width
+                    spacing: 8
+
+                    Text {
+                        text: pane._statusGlyph(parent.modelData.status)
+                        color: pane._statusColor(parent.modelData.status)
+                        font.family: pane.fontFamily
+                        font.pixelSize: 12
+                        font.bold: true
+                        width: 14
+                        horizontalAlignment: Text.AlignHCenter
+                    }
+                    Text {
+                        text: {
+                            const m = parent.modelData;
+                            const base = (m.name && m.name.length > 0) ? m.name : (m.email || "(unknown)");
+                            const isOrg = m.email && m.email === parent.parent._organizerEmail;
+                            return isOrg ? base + "  · organizer" : base;
+                        }
+                        color: pane.theme ? pane.theme.fg : "#000"
+                        font.family: pane.fontFamily
+                        font.pixelSize: 12
+                        width: parent.width - 22
+                        elide: Text.ElideRight
+                    }
                 }
             }
 
-            Row {
-                spacing: 8
-                width: parent.width
-                visible: pane._hasEvent
-                    && (pane.event.calendar || "").length > 0
-                Text {
-                    text: ""
-                    color: pane.theme ? pane.theme.subFg : "#888"
-                    font.family: pane.fontFamily
-                    font.pixelSize: 14
-                    width: 18
-                    horizontalAlignment: Text.AlignHCenter
-                }
-                Text {
-                    text: pane._hasEvent ? (pane.event.calendar || "") : ""
-                    color: pane.theme ? pane.theme.subFg : "#888"
-                    font.family: pane.fontFamily
-                    font.pixelSize: 12
-                    width: parent.width - 26
-                    elide: Text.ElideRight
-                }
+            Text {
+                visible: parent._all.length > parent._maxVisible
+                text: "+ " + (parent._all.length - parent._maxVisible) + " more"
+                color: pane.theme ? pane.theme.subFg : "#888"
+                font.family: pane.fontFamily
+                font.pixelSize: 11
+                opacity: 0.85
             }
         }
 

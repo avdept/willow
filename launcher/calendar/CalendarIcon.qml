@@ -17,15 +17,20 @@ Item {
     property var theme: null
     property string fontFamily: ""
 
-    // Re-sample once a minute so the icon flips at midnight even when the
-    // launcher has been idle. Pixel precision isn't needed; coarse polling
-    // is fine.
+    // Re-sample once a minute so the icon flips at midnight even when
+    // the launcher has been idle. We only reassign `now` when the calendar
+    // day has actually changed — otherwise every minute would invalidate
+    // the bound Text bindings for no visible reason.
     property date now: new Date()
     Timer {
         interval: 60 * 1000
         running: true
         repeat: true
-        onTriggered: root.now = new Date()
+        onTriggered: {
+            const next = new Date();
+            if (next.toDateString() !== root.now.toDateString())
+                root.now = next;
+        }
     }
 
     Rectangle {

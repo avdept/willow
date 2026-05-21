@@ -38,9 +38,13 @@ QtObject {
         _proc.running = true;
     }
 
+    // Shared empty sentinel so unmapped dates don't allocate a fresh
+    // array on every call (the cell delegate calls this 42×/refresh).
+    readonly property var _noEvents: []
+
     function eventsFor(d) {
-        if (!d) return [];
-        return eventsByDate[Qt.formatDate(d, "yyyy-MM-dd")] || [];
+        if (!d) return _noEvents;
+        return eventsByDate[Qt.formatDate(d, "yyyy-MM-dd")] || _noEvents;
     }
 
     // ── Internals ───────────────────────────────────────────────────────

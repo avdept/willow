@@ -34,6 +34,13 @@ Item {
             && a.getDate()     === b.getDate();
     }
 
+    // Chip background — accent at a slightly higher alpha on hover.
+    function _chipBg(hovered) {
+        if (!root.theme) return "#1e66f522";
+        const a = root.theme.accent;
+        return Qt.rgba(a.r, a.g, a.b, hovered ? 0.30 : 0.18);
+    }
+
     // True when the right-hand details pane is showing. Calendar
     // elements anchor to detailsDivider.left instead of parent.right
     // when this flips on, which is what makes the grid shrink.
@@ -286,15 +293,7 @@ Item {
                         height: 14
                         radius: 3
                         clip: true
-                        color: chipArea.containsMouse && root.theme
-                            ? Qt.rgba(root.theme.accent.r,
-                                      root.theme.accent.g,
-                                      root.theme.accent.b, 0.30)
-                            : (root.theme
-                                ? Qt.rgba(root.theme.accent.r,
-                                          root.theme.accent.g,
-                                          root.theme.accent.b, 0.18)
-                                : "#1e66f522")
+                        color: root._chipBg(chipArea.containsMouse)
                         opacity: cell.inMonth ? 1.0 : 0.55
 
                         // Click → push this event into the provider's
@@ -347,7 +346,7 @@ Item {
                             anchors.left: parent.left
                             anchors.leftMargin: 6
                             anchors.right: timeText.visible ? timeText.left : parent.right
-                            anchors.rightMargin: timeText.visible ? 4 : 4
+                            anchors.rightMargin: 4
                             anchors.verticalCenter: parent.verticalCenter
                             text: parent.modelData.summary || "(no title)"
                             color: root.theme ? root.theme.fg : "#000"
