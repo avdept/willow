@@ -54,6 +54,18 @@ match", ~500 for prefix, ~100 for substring, ~20 for fuzzy.
 
 ## Shipped
 
+- **NowProvider** — at-a-glance dashboard. Grid of tiles for weather,
+  CPU%, memory used/total, volume, battery (when present) and quick
+  links (Lock / Power / Bluetooth / Wi-Fi). Each tile renders a
+  nerd-font glyph + a live value via `ResultGridCell`'s `iconText`
+  fallback (no preview image). Sources: a single `/proc/stat` +
+  `/proc/meminfo` sampler shell every 3s, `omarchy-weather-icon` and
+  `omarchy-weather-status` every 5 min, Pipewire / UPower services
+  (reactive). Activations are routed through `hyprctl dispatch exec` so
+  detach-sensitive scripts (e.g. `omarchy-system-lock`, which forks a
+  backgrounded subshell holding hyprlock) survive the Process teardown.
+  Targets match the top bar: btop, `omarchy-launch-audio`,
+  `omarchy-menu power`, `omarchy-system-lock`, …
 - **AppsProvider** — `.desktop` apps via `Quickshell.DesktopEntries`.
   Always-on. Fuzzy scoring: exact > prefix > word-initials > substring >
   subsequence. Activation runs the entry via `uwsm-app`.

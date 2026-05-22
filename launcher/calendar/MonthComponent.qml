@@ -27,13 +27,6 @@ Item {
         "July", "August", "September", "October", "November", "December"
     ]
 
-    function _sameDay(a, b) {
-        if (!a || !b) return false;
-        return a.getFullYear() === b.getFullYear()
-            && a.getMonth()    === b.getMonth()
-            && a.getDate()     === b.getDate();
-    }
-
     // Chip background — accent at a slightly higher alpha on hover.
     function _chipBg(hovered) {
         if (!root.theme) return "#1e66f522";
@@ -188,15 +181,10 @@ Item {
         year:  root.provider ? root.provider.displayedYear  : 1970
         locale: Qt.locale()
 
-        onClicked: function (date) {
-            if (root.provider) root.provider.setFocused(date);
-        }
-
-        // Each cell is its own box: subtle right+bottom borders form the
-        // grid; day number sits in the top-right corner (with a filled
-        // circle when it's today); the rest of the cell is reserved for
-        // event chips (placeholder Column below — wire in once a calendar
-        // backend is connected).
+        // Each cell is its own box: subtle right+bottom borders form
+        // the grid, day number sits in the top-right corner (with a
+        // red circle when it's today), and the rest of the cell holds
+        // event chips.
         delegate: Rectangle {
             id: cell
             required property var model
@@ -206,18 +194,11 @@ Item {
             // share of the available area.
             width:  grid.availableWidth  / 7
             height: grid.availableHeight / 6
-            readonly property bool inMonth:  model.month === grid.month
-            readonly property bool isToday:  model.today === true
-            readonly property bool isFocused: root.provider
-                && root._sameDay(model.date, root.provider.focusedDate)
+            readonly property bool inMonth: model.month === grid.month
+            readonly property bool isToday: model.today === true
 
             color: {
                 if (!root.theme) return "transparent";
-                // Skip the focus tint when the cell is also today —
-                // the red day-number marker already distinguishes it,
-                // and stacking the accent fill on top looks noisy.
-                if (cell.isFocused && !cell.isToday)
-                    return Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.12);
                 if (!cell.inMonth)
                     return Qt.rgba(root.theme.fg.r, root.theme.fg.g, root.theme.fg.b, 0.025);
                 return "transparent";
@@ -257,9 +238,15 @@ Item {
             // Events for this day — fetched lazily; the binding tracks
             // `eventsModel.eventsByDate` (reassigned wholesale on each
             // refresh), so cells auto-update when sync completes.
-            readonly property var events: root.provider && root.provider.eventsModel
-                ? root.provider.eventsModel.eventsFor(cell.model.date)
-                : []
+            // Filter chips by the provider's `searchQuery` (lowercase
+             // substring on the event summary). Empty query → all events.
+            readonly property var events: {
+                if (!root.provider || !root.provider.eventsModel) return [];
+                const all = root.provider.eventsModel.eventsFor(cell.model.date);
+                const q = root.provider.searchQuery || "";
+                if (q.length === 0) return all;
+                return all.filter(e => (e.summary || "").toLowerCase().indexOf(q) !== -1);
+            }
             // How many event chips fit; the rest are folded into a
             // "+N more" line at the bottom.
             readonly property int _maxChips: 3

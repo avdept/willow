@@ -36,10 +36,6 @@ Provider {
     // Bound directly into MonthGrid (month is 0-11).
     property int displayedMonth: (new Date()).getMonth()
     property int displayedYear:  (new Date()).getFullYear()
-    // Day with the keyboard / click highlight. Distinct from `today` —
-    // today is whatever the system date is; focusedDate is what the user
-    // has selected, and clicking a day or arrow-keying around moves it.
-    property date focusedDate: new Date()
 
     // Events loaded from the vdirsyncer cache. Views read this via
     // `provider.eventsModel.eventsFor(date)`. Refreshed when the
@@ -52,6 +48,11 @@ Provider {
     property var selectedEvent: null
 
     function selectEvent(ev) { selectedEvent = ev; }
+
+    // Lowercase-trimmed search query; cells use this to filter their
+    // chips by `summary`. Empty = no filtering. Driven by the launcher's
+    // search input via the standard `search()` provider hook below.
+    property string searchQuery: ""
 
     // Qt.callLater dedupes calls scheduled in the same event-loop tick,
     // so going Dec → Jan (both displayedMonth and displayedYear fire)
@@ -86,32 +87,13 @@ Provider {
         const t = new Date();
         displayedMonth = t.getMonth();
         displayedYear  = t.getFullYear();
-        focusedDate    = t;
-    }
-
-    function setFocused(d) {
-        focusedDate = d;
-        if (d.getMonth() !== displayedMonth || d.getFullYear() !== displayedYear) {
-            displayedMonth = d.getMonth();
-            displayedYear  = d.getFullYear();
-        }
-    }
-
-    function _shiftDays(n) {
-        const d = new Date(focusedDate);
-        d.setDate(d.getDate() + n);
-        setFocused(d);
     }
 
     function handleKey(event) {
         switch (event.key) {
-        case Qt.Key_Left:     _shiftDays(-1); return true;
-        case Qt.Key_Right:    _shiftDays(1);  return true;
-        case Qt.Key_Up:       _shiftDays(-7); return true;
-        case Qt.Key_Down:     _shiftDays(7);  return true;
         case Qt.Key_PageUp:   goPrevMonth();  return true;
-        case Qt.Key_PageDown: goNextMonth(); return true;
-        case Qt.Key_Home:     goToday();     return true;
+        case Qt.Key_PageDown: goNextMonth();  return true;
+        case Qt.Key_Home:     goToday();      return true;
         }
         return false;
     }
@@ -128,14 +110,23 @@ Provider {
     }
 
     // Launcher resets every provider when it closes / returns to menu.
-    // Drop the selected event so the next open isn't stuck on a stale
-    // details pane.
+    // Snap the view back to today's month, drop any selected event and
+    // clear the search filter, so re-entering the calendar always
+    // starts on a clean current month.
     function reset() {
-        selectedEvent = null;
+        const t = new Date();
+        displayedMonth = t.getMonth();
+        displayedYear  = t.getFullYear();
+        searchQuery    = "";
+        selectedEvent  = null;
     }
 
-    // No search results — the calendar owns the whole pane.
-    function search(text) {}
+    // Search input is repurposed as an in-view event filter — we don't
+    // produce launcher result rows (the calendar owns the whole pane);
+    // we just store the query and let the cell delegates filter chips.
+    function search(text) {
+        searchQuery = (text || "").toLowerCase().trim();
+    }
     function activate(result) {}
 
     // ── View ────────────────────────────────────────────────────────────

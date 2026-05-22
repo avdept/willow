@@ -36,7 +36,7 @@ PanelWindow {
 
     // ── Layout constants ─────────────────────────────────────────────────
     readonly property int defaultCardWidth:  640
-    readonly property int defaultCardHeight: 560
+    readonly property int defaultCardHeight: 640
     readonly property int searchRowHeight:   56
     readonly property int footerHeight:      28
     readonly property int dividerHeight:     1
@@ -101,27 +101,30 @@ PanelWindow {
     }
 
     // ── Providers ────────────────────────────────────────────────────────
-    AppsProvider  { id: appsProv;  onResultsChanged: launcher._onProviderResults(0) }
-    FilesProvider { id: filesProv; onResultsChanged: launcher._onProviderResults(1) }
+    // Now is registered first so it owns index 0 — `show()` auto-enters
+    // that index, opening the launcher directly onto the dashboard.
+    NowProvider   { id: nowProv;   onResultsChanged: launcher._onProviderResults(0) }
+    AppsProvider  { id: appsProv;  onResultsChanged: launcher._onProviderResults(1) }
+    FilesProvider { id: filesProv; onResultsChanged: launcher._onProviderResults(2) }
     StyleProvider {
         id: styleProv
-        onResultsChanged: launcher._onProviderResults(2)
-        onViewChanged: if (launcher.activeProvIdx === 2) launcher._onProviderViewChanged()
+        onResultsChanged: launcher._onProviderResults(3)
+        onViewChanged: if (launcher.activeProvIdx === 3) launcher._onProviderViewChanged()
     }
     GithubProvider {
         id: ghProv
-        onResultsChanged: launcher._onProviderResults(3)
-        onDetailChanged:  launcher._onProviderDetailChanged(3)
+        onResultsChanged: launcher._onProviderResults(4)
+        onDetailChanged:  launcher._onProviderDetailChanged(4)
         // The provider flips `detailsEnabled` async after its `gh auth`
         // probe lands; re-sync the launcher's layout if we're showing
         // this category at that moment. (cardWidth is bound to
         // `requestedWidth` directly, so it doesn't need a handler.)
-        onDetailsEnabledChanged: if (launcher.activeProvIdx === 3) launcher._syncRightLayout()
+        onDetailsEnabledChanged: if (launcher.activeProvIdx === 4) launcher._syncRightLayout()
     }
-    CalendarProvider { id: calProv; onResultsChanged: launcher._onProviderResults(4) }
+    CalendarProvider { id: calProv; onResultsChanged: launcher._onProviderResults(5) }
 
     Component.onCompleted: {
-        providers = [appsProv, filesProv, styleProv, ghProv, calProv];
+        providers = [nowProv, appsProv, filesProv, styleProv, ghProv, calProv];
         // Any provider can ask the launcher to close itself (e.g. after
         // opening a URL externally) by emitting `requestClose`.
         for (let i = 0; i < providers.length; i++) {
@@ -201,6 +204,10 @@ PanelWindow {
         if (provIdx === activeProvIdx) return;
         const p = providers[provIdx];
         if (!p) return;
+        // Clean up the outgoing provider's state — same hook used on
+        // back-to-menu / launcher close.
+        const outgoing = providers[activeProvIdx];
+        if (outgoing && outgoing.reset) outgoing.reset();
         activeProvIdx = provIdx;
         queryText = "";
         currentIndex = 0;
@@ -599,14 +606,6 @@ PanelWindow {
                             break;
                         case Qt.Key_PageDown:  launcher.moveSelection(cols*5);  event.accepted = true; break;
                         case Qt.Key_PageUp:    launcher.moveSelection(-cols*5); event.accepted = true; break;
-                        case Qt.Key_Backspace:
-                            // Empty query inside a provider — navigate back
-                            // (provider sub-view first, then the menu).
-                            if (launcher.mode === "provider" && searchField.text.length === 0) {
-                                launcher.goBack();
-                                event.accepted = true;
-                            }
-                            break;
                         }
                     }
                 }
