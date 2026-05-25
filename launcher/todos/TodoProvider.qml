@@ -171,11 +171,9 @@ Provider {
     //     list (see `filteredTodos` below).
     property string searchQuery: ""
 
-    // Emitted from activate() to ask the launcher to drill into this
-    // provider, preserving the current query. Launcher.qml wires this
-    // up so clicking a todo from the main menu opens the edit form
-    // inside the Todos view rather than dismissing the launcher.
-    signal requestEnter(string initialQuery)
+    // Count of currently-active todos. Bound from NowProvider's
+    // dashboard tile via Launcher.qml.
+    readonly property int unfinishedCount: todos.filter(t => !t.completed_on).length
 
     function _matches(t, q) {
         if (!q) return true;
@@ -206,7 +204,7 @@ Provider {
         // Open the edit form for the chosen todo, then ask the launcher
         // to drill into this provider so the user actually sees it.
         openForm(result.data.id);
-        requestEnter(searchQuery);
+        requestEnter("Todos", searchQuery);
         return true;    // keep launcher open
     }
 

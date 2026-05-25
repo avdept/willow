@@ -104,7 +104,11 @@ PanelWindow {
     // ── Providers ────────────────────────────────────────────────────────
     // Now is registered first so it owns index 0 — `show()` auto-enters
     // that index, opening the launcher directly onto the dashboard.
-    NowProvider   { id: nowProv;   onResultsChanged: launcher._onProviderResults(0) }
+    NowProvider {
+        id: nowProv
+        onResultsChanged: launcher._onProviderResults(0)
+        unfinishedTodos: todoProv.unfinishedCount
+    }
     AppsProvider  { id: appsProv;  onResultsChanged: launcher._onProviderResults(1) }
     FilesProvider { id: filesProv; onResultsChanged: launcher._onProviderResults(2) }
     StyleProvider {
@@ -130,23 +134,26 @@ PanelWindow {
         // and Qt drops focus entirely. Restore it to the launcher's
         // search field so the user can keep typing / hit Esc to leave.
         onFormOpenChanged: if (!formOpen) Qt.callLater(() => searchField.forceActiveFocus())
-        // Clicking a todo result in the main-menu aggregated search
-        // asks us to drill into the Todos view so the edit form (which
-        // activate() already opened) becomes visible. Deferred so the
-        // launcher finishes its activate() flow first.
-        onRequestEnter: function (initialQuery) {
-            Qt.callLater(() => launcher.enterProviderById(6, initialQuery));
-        }
     }
 
     Component.onCompleted: {
         providers = [nowProv, appsProv, filesProv, styleProv, ghProv, calProv, todoProv];
-        // Any provider can ask the launcher to close itself (e.g. after
-        // opening a URL externally) by emitting `requestClose`.
         for (let i = 0; i < providers.length; i++) {
             const p = providers[i];
-            if (p && p.requestClose)
+            if (!p) continue;
+            // Any provider can ask the launcher to close itself (e.g.
+            // after opening a URL externally).
+            if (p.requestClose)
                 p.requestClose.connect(launcher.hide);
+            // Cross-provider drill-in: provider names map to indices
+            // here, callLater so the requesting activate() finishes
+            // before we mutate launcher state.
+            if (p.requestEnter)
+                p.requestEnter.connect((name, query) => {
+                    const idx = launcher.providers.findIndex(x => x && x.name === name);
+                    if (idx >= 0)
+                        Qt.callLater(() => launcher.enterProviderById(idx, query));
+                });
         }
         _validateShortcuts();
         _computeLeft();

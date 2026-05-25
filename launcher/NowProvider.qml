@@ -30,6 +30,10 @@ Provider {
     property int _cpuPct: -1
     property real _memUsedGiB: 0
     property real _memTotalGiB: 0
+    // Bound from Launcher.qml to TodoProvider.unfinishedCount. Drives
+    // the Todos tile's count.
+    property int unfinishedTodos: 0
+    onUnfinishedTodosChanged: _publish()
 
     readonly property var _sink: Pipewire.defaultAudioSink
     readonly property var _batt: UPower.displayDevice
@@ -173,6 +177,12 @@ Provider {
         const tiles = [];
 
         tiles.push({
+            glyph: "",
+            title: prov.unfinishedTodos + (prov.unfinishedTodos === 1 ? " todo" : " todos"),
+            id: "todos"
+        });
+
+        tiles.push({
             glyph: prov._weatherIcon || "󰖕",
             title: prov._weatherTemp || "Weather",
             id: "weather"
@@ -275,6 +285,9 @@ Provider {
         case "wifi":
             cmd = _hyprExec("omarchy-launch-wifi");
             break;
+        case "todos":
+            requestEnter("Todos", "");
+            return true;    // keep launcher open; launcher will drill in
         default:
             return;
         }

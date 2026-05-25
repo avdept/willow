@@ -125,6 +125,13 @@ QtObject {
     // this to `hide()` at construction time.
     signal requestClose()
 
+    // Ask the launcher to drill into a sibling provider by `name` (the
+    // value of that provider's `name` property), with an optional
+    // initial query. The launcher wires this generically — useful for
+    // dashboard tiles (NowProvider → Todos) or search activations that
+    // should hand off to another provider's view.
+    signal requestEnter(string providerName, string initialQuery)
+
     // ── Contract (override in subclass) ──────────────────────────────────
     function search(text) {}
     // Return a truthy value to keep the launcher open after activation
