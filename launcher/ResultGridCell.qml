@@ -17,6 +17,9 @@ Item {
     property int currentIndex: -1
     required property var theme       // .bg .fg .subFg .accent .border
     required property string fontFamily
+    // Reserved for future grid cells that host live Component icons —
+    // see ResultDelegate.qml for the threading pattern.
+    property bool launcherOpen: false
 
     signal activated(int index)
     signal hovered(int index)

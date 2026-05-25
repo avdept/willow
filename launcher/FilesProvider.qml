@@ -76,6 +76,7 @@ Provider {
     }
 
     function _flush() {
+        const q = norm(_pending);
         const out = [];
         for (let i = 0; i < _pendingBuf.length; i++) {
             const raw = _pendingBuf[i];
@@ -89,12 +90,16 @@ Provider {
             const slash = clean.lastIndexOf("/");
             const base = slash >= 0 ? clean.slice(slash + 1) : clean;
             const dir  = slash >= 0 ? clean.slice(0, slash)  : "";
+            // fd already filtered; a tiny epsilon-per-index tiebreaker
+            // keeps fd's relevance order when query+basename are
+            // equally good for two results.
+            const s = scorePath(q, norm(clean));
             out.push({
                 title:       base,
                 subtitle:    dir,
                 iconText:    isDir ? folderGlyph : fileGlyph,
                 providerTag: isDir ? "folder" : "file",
-                score:       maxResults - i,         // preserve fd's relevance order
+                score:       s + (maxResults - i) * 0.001,
                 data:        { path: clean }
             });
         }
@@ -104,12 +109,6 @@ Provider {
     function activate(result) {
         const path = result?.data?.path;
         if (!path) return;
-        openProc.command = ["xdg-open", path];
-        openProc.running = true;
-    }
-
-    Process {
-        id: openProc
-        running: false
+        openExternal(["xdg-open", path]);
     }
 }

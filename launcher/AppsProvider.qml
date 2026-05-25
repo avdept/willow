@@ -100,8 +100,6 @@ Provider {
             prov._rebuildEntries()
     }
 
-    // ── Icon resolution ──────────────────────────────────────────────────
-
     function _resolveIconUrl(raw) {
         if (!raw)
             return _genericIconUrl;
@@ -142,8 +140,6 @@ Provider {
         return "";
     }
 
-    // ── Entry build ──────────────────────────────────────────────────────
-
     function _rebuildEntries() {
         const out = [];
         const list = DesktopEntries.applications.values;
@@ -171,22 +167,17 @@ Provider {
         refresh();
     }
 
-    // ── Search ───────────────────────────────────────────────────────────
-
     function search(text) {
-        const q = (text || "").toLowerCase().trim();
+        const q = norm(text);
         if (q.length === 0) {
             results = _entries.map(it => _toResult(it, 0));
             return;
         }
         const scored = [];
         for (let i = 0; i < _entries.length; i++) {
-            const s = _score(_entries[i], q);
-            if (s > 0)
-                scored.push({
-                    it: _entries[i],
-                    s: s
-                });
+            const it = _entries[i];
+            const s = scoreText(q, it.nameLower, it.commentLower);
+            if (s > 0) scored.push({ it: it, s: s });
         }
         scored.sort((a, b) => b.s - a.s);
         if (scored.length > maxResults)
@@ -206,50 +197,6 @@ Provider {
         };
     }
 
-    // Score: higher = better. 0 = no match.
-    function _score(it, q) {
-        const n = it.nameLower;
-        if (n === q)
-            return 1000;
-        if (n.startsWith(q))
-            return 500 + (50 - Math.min(n.length, 50));
-        const wb = _wordInitials(n, q);
-        if (wb > 0)
-            return 200 + wb;
-        if (n.indexOf(q) !== -1)
-            return 100;
-        if (it.commentLower.indexOf(q) !== -1)
-            return 40;
-        if (_isSubsequence(n, q))
-            return 20;
-        return 0;
-    }
-
-    // "Visual Studio Code" + "vsc" -> match (one hit per word initial).
-    function _wordInitials(name, q) {
-        const parts = name.split(/[\s\-_./]+/);
-        let qi = 0, hit = 0;
-        for (let i = 0; i < parts.length && qi < q.length; i++) {
-            if (parts[i].length === 0)
-                continue;
-            if (parts[i][0] === q[qi]) {
-                qi++;
-                hit++;
-            }
-        }
-        return qi === q.length ? hit * 10 : 0;
-    }
-
-    function _isSubsequence(haystack, needle) {
-        let i = 0;
-        for (let j = 0; j < haystack.length && i < needle.length; j++)
-            if (haystack[j] === needle[i])
-                i++;
-        return i === needle.length;
-    }
-
-    // ── Activation ───────────────────────────────────────────────────────
-
     function activate(result) {
         const entry = result?.data?.entry;
         if (!entry)
@@ -263,15 +210,9 @@ Provider {
             }
             return;
         }
-        launchProc.command = entry.runInTerminal ? ["uwsm-app", "--", "xdg-terminal-exec", "--"].concat(cmd) : ["uwsm-app", "--"].concat(cmd);
-        launchProc.workingDirectory = entry.workingDirectory || "";
-        if (launchProc.running)
-            launchProc.running = false;
-        launchProc.running = true;
-    }
-
-    Process {
-        id: launchProc
-        running: false
+        const argv = entry.runInTerminal
+            ? ["uwsm-app", "--", "xdg-terminal-exec", "--"].concat(cmd)
+            : ["uwsm-app", "--"].concat(cmd);
+        openExternal(argv, { cwd: entry.workingDirectory || "" });
     }
 }

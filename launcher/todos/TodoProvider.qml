@@ -36,31 +36,24 @@ Provider {
     actionShortcuts: ({ "+t": "new" })
 
     resultsLayout: "custom"
-    // Card width grows by `_sidebarWidth` when the form is open so the
-    // sidebar slides into freshly-allocated space instead of squashing
-    // the list. The launcher animates card.width via its existing
-    // Behavior; TodoView's sidebar matches the same duration/easing.
+    // Card width grows when the form is open so the sidebar slides into
+    // fresh space instead of squashing the list.
     readonly property int _baseWidth: 880
     readonly property int _sidebarWidth: 340
     requestedWidth: _baseWidth + (formOpen ? _sidebarWidth : 0)
     requestedHeight: 640
 
-    // ── State ───────────────────────────────────────────────────────────
     property var todos: []
-    // When true, the right side of TodoView reveals a form sidebar.
-    // openForm() / closeForm() are the only ways to flip this so
-    // focus management (see Launcher.qml's Connections on todoProv)
-    // can react.
+    // openForm() / closeForm() are the only ways to flip `formOpen` so
+    // focus restoration in Launcher.qml's Connections can react.
     property bool formOpen: false
-    // Empty = creating a new todo. Set = editing an existing one.
+    // Empty = create mode, set = editing existing.
     property string editingId: ""
-    // Field values to hydrate the form with on open. Set by openForm()
-    // (empty for create mode, pre-filled for edit mode); the form
-    // reads it on formOpen → true via its Connections block.
+    // Hydration values for the form on open; form reads on formOpen rising
+    // edge via its Connections block.
     property var editingDraft: ({})
 
-    // Open the form. Pass an existing todo id to enter edit mode;
-    // call with no args to create a fresh todo.
+    // Pass an existing todo id to edit; no args to create.
     function openForm(id) {
         if (id) {
             const t = todos.find(x => x.id === id);
@@ -88,7 +81,6 @@ Provider {
         editingDraft = {};
     }
 
-    // ── Persistence ─────────────────────────────────────────────────────
     FileView {
         id: store
         path: Qt.resolvedUrl("todos.json").toString().replace(/^file:\/\//, "")
@@ -119,7 +111,6 @@ Provider {
         store.setText(JSON.stringify(todos, null, 2) + "\n");
     }
 
-    // ── CRUD ────────────────────────────────────────────────────────────
     function _newId() {
         return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
     }
@@ -163,72 +154,72 @@ Provider {
         });
     }
 
-    // ── Launcher contract ───────────────────────────────────────────────
-    // The search input does double duty:
-    //   • In menu mode, search() populates `results` so todos appear in
-    //     the aggregated main-page search across all providers.
-    //   • In provider mode, the same `searchQuery` filters the in-view
-    //     list (see `filteredTodos` below).
+    // Search input does double duty: search() populates aggregated
+    // menu-mode results, and `searchQuery` filters the in-view list
+    // via filteredTodos.
     property string searchQuery: ""
 
-    // Count of currently-active todos. Bound from NowProvider's
-    // dashboard tile via Launcher.qml.
+    // Bound from NowProvider's todos tile via Launcher.qml.
     readonly property int unfinishedCount: todos.filter(t => !t.completed_on).length
 
-    function _matches(t, q) {
-        if (!q) return true;
-        return (t.name || "").toLowerCase().includes(q)
-            || (t.description || "").toLowerCase().includes(q)
-            || (t.tags || []).some(tag => (tag || "").toLowerCase().includes(q));
+    function _score(t, q) {
+        let best = scoreText(q, norm(t.name), norm(t.description));
+        const tags = t.tags || [];
+        for (let i = 0; i < tags.length; i++) {
+            const s = scoreText(q, norm(tags[i])) * 0.4;
+            if (s > best) best = s;
+        }
+        // Completed todos still match, but rank below pending ones with
+        // the same query strength.
+        return t.completed_on ? best * 0.3 : best;
     }
 
     function search(text) {
-        const q = (text || "").toLowerCase().trim();
+        const q = norm(text);
         searchQuery = q;
         if (!q) { results = []; return; }
-        const matches = todos.filter(t => _matches(t, q));
-        results = matches.map(t => ({
-            title: t.name || "(untitled)",
-            subtitle: t.completed_on
-                ? "Completed " + (t.completed_on || "").slice(0, 10)
-                : (t.description || (t.due_date ? "Due " + t.due_date : "")),
-            // Pending todos rank above completed ones in the merged list.
-            score: t.completed_on ? 200 : 700,
-            tagColor: t.completed_on ? "success" : "info",
-            data: t,
-        }));
+        const out = [];
+        for (let i = 0; i < todos.length; i++) {
+            const t = todos[i];
+            const s = _score(t, q);
+            if (s <= 0) continue;
+            out.push({
+                title: t.name || "(untitled)",
+                subtitle: t.completed_on
+                    ? "Completed " + (t.completed_on || "").slice(0, 10)
+                    : (t.description || (t.due_date ? "Due " + t.due_date : "")),
+                score: s,
+                tagColor: t.completed_on ? "success" : "info",
+                data: t,
+            });
+        }
+        results = out;
     }
 
     function activate(result) {
         if (!result || !result.data) return;
-        // Open the edit form for the chosen todo, then ask the launcher
-        // to drill into this provider so the user actually sees it.
         openForm(result.data.id);
         requestEnter("Todos", searchQuery);
-        return true;    // keep launcher open
+        return true;
     }
 
-    // Handle action shortcuts registered above. Called by the launcher
-    // after it has already drilled into this provider.
     function invokeAction(name, rest) {
         if (name === "new") {
-            // Skip openForm() so we can seed the draft with whatever
-            // the user typed after "+t " (the form's Connections
-            // hydrate from editingDraft and focus the name input).
+            // Skip openForm() so we can seed the draft with what the
+            // user typed after the shortcut.
             editingId = "";
             editingDraft = { name: (rest || "").trim() };
             formOpen = true;
         }
     }
 
-    // View-bound list: `todos` filtered by the current searchQuery.
-    // Used as the model for TodoView's ListView so typing in the
-    // search input narrows the visible list live.
+    // Model for TodoView's ListView. Filtered by searchQuery so typing
+    // narrows the visible list live.
     readonly property var filteredTodos: {
         const q = searchQuery;
         const cutoff = Date.now() - 24 * 60 * 60 * 1000;
 
-        let list = q ? todos.filter(t => _matches(t, q)) : todos.slice();
+        let list = q ? todos.filter(t => _score(t, q) > 0) : todos.slice();
 
         list = list.filter(t => {
             if (!t.completed_on) return true;

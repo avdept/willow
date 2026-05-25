@@ -38,20 +38,15 @@ Provider {
     readonly property var _sink: Pipewire.defaultAudioSink
     readonly property var _batt: UPower.displayDevice
 
-    Component.onCompleted: {
-        _publish();
-        weatherIconProc.running = true;
-        weatherStatusProc.running = true;
-        statsProc.running = true;
-    }
+    Component.onCompleted: _publish()
 
-    // ── Weather (glyph + temp) ───────────────────────────────────────────
-    // The bar uses the same two commands; refresh every 5 minutes.
+    // The bar (shell.qml) has its own weather poller; this one only feeds
+    // the Now tile, so it pauses while the launcher is closed.
     Timer {
         interval: 300000
-        running: true
+        running: prov.launcherOpen
         repeat: true
-        triggeredOnStart: false
+        triggeredOnStart: true
         onTriggered: {
             if (!weatherIconProc.running)
                 weatherIconProc.running = true;
@@ -82,14 +77,13 @@ Provider {
         }
     }
 
-    // ── CPU + memory sampler (single shell) ──────────────────────────────
-    // 1s tick — the script itself adds a 200ms sleep between /proc/stat
-    // samples to compute the delta, so effective CPU coverage is ~80%.
+    // 1s tick — the script's own 200ms sleep between /proc/stat samples
+    // means effective CPU coverage is ~80%. Pauses while launcher is closed.
     Timer {
         interval: 1000
-        running: true
+        running: prov.launcherOpen
         repeat: true
-        triggeredOnStart: false
+        triggeredOnStart: true
         onTriggered: if (!statsProc.running)
             statsProc.running = true
     }
@@ -136,8 +130,6 @@ Provider {
             prov._publish();
         }
     }
-
-    // ── Tile builders ────────────────────────────────────────────────────
 
     function _volTile() {
         const a = prov._sink ? prov._sink.audio : null;
@@ -246,63 +238,42 @@ Provider {
         results = out;
     }
 
-    // ── Search (always returns the full grid; query is ignored) ──────────
+    // Query is ignored; the grid always shows the full tile set.
     function search(_text) {
         _publish();
     }
 
-    // ── Activation ───────────────────────────────────────────────────────
-    // Anything that needs to outlive our Process (long-running GUIs, the
-    // hyprlock surface, etc.) is routed through `hyprctl dispatch exec` —
-    // that's the same path the SUPER+CTRL+L keybind uses, so it's known
-    // to detach cleanly under this compositor.
     function activate(result) {
         const id = result?.data?.id;
         if (!id)
             return;
-        let cmd;
         switch (id) {
         case "weather":
-            cmd = ["sh", "-c", "notify-send -u low \"$(omarchy-weather-status)\""];
-            break;
+            openExternal(["sh", "-c", "notify-send -u low \"$(omarchy-weather-status)\""]);
+            return;
         case "cpu":
         case "memory":
-            cmd = _hyprExec("omarchy-launch-or-focus-tui btop");
-            break;
+            openExternal(["omarchy-launch-or-focus-tui", "btop"]);
+            return;
         case "volume":
-            cmd = _hyprExec("omarchy-launch-audio");
-            break;
+            openExternal(["omarchy-launch-audio"]);
+            return;
         case "battery":
         case "power":
-            cmd = _hyprExec("omarchy-menu power");
-            break;
+            openExternal(["omarchy-menu", "power"]);
+            return;
         case "lock":
-            cmd = _hyprExec("omarchy-system-lock");
-            break;
+            openExternal(["omarchy-system-lock"]);
+            return;
         case "bluetooth":
-            cmd = _hyprExec("omarchy-launch-bluetooth");
-            break;
+            openExternal(["omarchy-launch-bluetooth"]);
+            return;
         case "wifi":
-            cmd = _hyprExec("omarchy-launch-wifi");
-            break;
+            openExternal(["omarchy-launch-wifi"]);
+            return;
         case "todos":
             requestEnter("Todos", "");
             return true;    // keep launcher open; launcher will drill in
-        default:
-            return;
         }
-        actProc.command = cmd;
-        if (actProc.running)
-            actProc.running = false;
-        actProc.running = true;
-    }
-
-    function _hyprExec(line) {
-        return ["hyprctl", "dispatch", "exec", line];
-    }
-
-    Process {
-        id: actProc
-        running: false
     }
 }

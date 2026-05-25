@@ -13,6 +13,9 @@ Item {
     property int currentIndex: -1
     required property var theme       // .bg .fg .subFg .accent .border
     required property string fontFamily
+    // Forwarded to live icon Components (e.g. CalendarIcon) so they can
+    // pause background timers while the launcher is hidden.
+    required property bool launcherOpen
 
     signal activated(int index)
     signal hovered(int index)
@@ -25,7 +28,6 @@ Item {
     anchors.left:  parent ? parent.left  : undefined
     anchors.right: parent ? parent.right : undefined
 
-    // Selection background
     Rectangle {
         anchors.fill: parent
         color: row.isSelected
@@ -84,6 +86,8 @@ Item {
                 onLoaded: if (item) {
                     item.theme = row.theme;
                     item.fontFamily = row.fontFamily;
+                    if (item.launcherOpen !== undefined)
+                        item.launcherOpen = Qt.binding(() => row.launcherOpen);
                 }
             }
 
@@ -116,7 +120,6 @@ Item {
             }
         }
 
-        // Title + subtitle
         Column {
             anchors.verticalCenter: parent.verticalCenter
             width: rowLayout.width - iconBox.width - tagBox.width - rowLayout.spacing * 2
@@ -154,7 +157,6 @@ Item {
             width: row.modelData?.chevron ? 16 : (tagText.implicitWidth + 14)
             height: 18
 
-            // Chevron (menu mode)
             Text {
                 anchors.centerIn: parent
                 visible: row.modelData?.chevron === true
@@ -165,9 +167,8 @@ Item {
                 opacity: row.isSelected ? 1.0 : 0.6
             }
 
-            // Tag pill (result mode). The provider may set `tagColor` on
-            // the row — one of "success" | "info" | "purple" | "warn" |
-            // "danger" | "cyan" | "accent" | "" (default = muted border).
+            // Provider may set `tagColor`: "success" | "info" | "purple" |
+            // "warn" | "danger" | "cyan" | "accent" | "" (muted default).
             readonly property bool _showTag: !row.modelData?.chevron && (row.modelData?.providerTag ?? "").length > 0
             readonly property color _tagBase: {
                 const name = row.modelData?.tagColor ?? "";

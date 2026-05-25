@@ -12,6 +12,8 @@ Item {
     property string fontFamily: ""
     // The event blob from EventsModel (see calendar-events.py for shape).
     property var event: null
+    // Owning CalendarProvider — supplies `linkify()` for the description.
+    property var provider: null
 
     signal close()
     // Fired after Qt.openUrlExternally launches a description link, so
@@ -37,20 +39,11 @@ Item {
         return Qt.formatTime(d, "HH:mm");
     }
 
-    // HTML-escape and wrap http(s) URLs in <a> tags so the description
-    // Text (textFormat: RichText) renders them clickable. Newlines get
-    // converted to <br> so plain-text wrapping still works.
-    function _linkify(text) {
-        if (!text) return "";
-        const esc = text
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;")
-            .replace(/"/g, "&quot;");
-        const urlRe = /(https?:\/\/[^\s<>"']+)/g;
-        return esc
-            .replace(urlRe, '<a href="$1">$1</a>')
-            .replace(/\n/g, "<br>");
+    // linkify is shared (Provider.qml); descriptions are multi-line so we
+    // also convert newlines to <br> on top of that.
+    function _descHtml(text) {
+        if (!pane.provider) return "";
+        return pane.provider.linkify(text).replace(/\n/g, "<br>");
     }
 
     // PARTSTAT → glyph + colour. Used by the Attendees list.
@@ -315,7 +308,7 @@ Item {
         Text {
             id: descText
             width: parent.width
-            text: pane._hasEvent ? pane._linkify(pane.event.description || "") : ""
+            text: pane._hasEvent ? pane._descHtml(pane.event.description || "") : ""
             color: pane.theme ? pane.theme.fg : "#000"
             linkColor: pane.theme ? pane.theme.accent : "#1e66f5"
             font.family: pane.fontFamily

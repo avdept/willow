@@ -22,7 +22,12 @@ Core provider contract (read `Provider.qml` for full details):
   titleFont, score, data }`. Everything except `title` and `score` is
   optional. `tagColor` is one of `"success" | "info" | "purple" |
   "warn" | "danger" | "cyan" | "accent"`; missing = muted default.
-- `activate(result)` — called when the user picks this row.
+- `activate(result)` — called when the user picks this row. Use
+  `openExternal(argv, opts?)` to launch external commands: by default
+  the call is routed through `hyprctl dispatch exec` so the spawned
+  process is reparented to Hyprland and survives `killall qs`. Pass
+  `{ detach: "none" }` only when the command already handles its own
+  detach (rare), and `{ cwd }` for a working directory.
 
 Opt-in extensions:
 
@@ -47,8 +52,23 @@ Opt-in extensions:
   `detailWidth`, observe `selectedRow`, push a `detail` blob shaped per
   `DetailsPane.qml`.
 
-Higher `score` ranks higher in the merged list. Use ~1000 for "perfect
-match", ~500 for prefix, ~100 for substring, ~20 for fuzzy.
+Higher `score` ranks higher in the merged list. Provider exposes a
+shared scorer — use it instead of rolling your own ladder:
+
+```js
+const q = norm(text);
+const s = scoreText(q, primaryLower, secondaryLower, ...);   // 1+ fields
+const s = scorePath(q, pathLower);                            // filesystem-shaped
+```
+
+Bands returned by `scoreText()`: 1000 exact, 500+ prefix, 200+ word-
+initials, 100 substring, 20 subsequence, 0 no-match. Multiply to bias
+(`× 0.3` for completed/secondary, `× 1.5` for "current") but never
+invent new band magnitudes — cross-provider menu aggregation depends
+on the ladder staying stable.
+
+All inputs MUST be pre-lowercased+trimmed via `norm()`; the scorer
+skips that work for hot loops.
 
 ---
 

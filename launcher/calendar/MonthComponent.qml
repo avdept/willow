@@ -1,12 +1,6 @@
-// Month view — Apple-style 6×7 grid backed by Qt Quick Controls'
-// `MonthGrid` + `DayOfWeekRow` (locale-aware). Header has prev / today /
-// next; today is a filled circle in `theme.danger`; the focused day gets
-// an outline in `theme.accent`; out-of-month days fade.
-//
-// Sibling views (Week, Day) live next to this file under launcher/calendar/
-// and will follow the same shape: take `theme`, `fontFamily`, and the
-// owning `provider`, render the right pane, and call mutators on the
-// provider for state changes.
+// Month view — Apple-style 6×7 grid via `MonthGrid` + `DayOfWeekRow`
+// (locale-aware). Today is a filled circle in `theme.danger`; focused
+// day is outlined in `theme.accent`; out-of-month days fade.
 
 import QtQuick
 import QtQuick.Controls
@@ -15,9 +9,7 @@ Item {
     id: root
     anchors.fill: parent
 
-    // Set by Launcher.onLoaded (when this component is the active
-    // provider's customComponent root). Null until then — bindings
-    // below guard against the brief uninitialised window.
+    // Injected by Launcher.onLoaded; null until then so bindings guard.
     property var theme: null
     property string fontFamily: ""
     property var provider: null
@@ -27,20 +19,17 @@ Item {
         "July", "August", "September", "October", "November", "December"
     ]
 
-    // Chip background — accent at a slightly higher alpha on hover.
     function _chipBg(hovered) {
         if (!root.theme) return "#1e66f522";
         const a = root.theme.accent;
         return Qt.rgba(a.r, a.g, a.b, hovered ? 0.30 : 0.18);
     }
 
-    // True when the right-hand details pane is showing. Calendar
-    // elements anchor to detailsDivider.left instead of parent.right
-    // when this flips on, which is what makes the grid shrink.
+    // Calendar elements anchor to detailsDivider.left instead of
+    // parent.right when this flips on — that's what shrinks the grid.
     readonly property bool _showDetails:
         root.provider && root.provider.selectedEvent !== null
 
-    // ── Header: month label + prev / today / next ──────────────────────
     Item {
         id: header
         anchors.left: parent.left
@@ -111,7 +100,6 @@ Item {
         opacity: 0.5
     }
 
-    // ── Day-of-week labels (locale-aware) ──────────────────────────────
     DayOfWeekRow {
         id: dayHeader
         anchors.left: parent.left
@@ -165,7 +153,6 @@ Item {
         opacity: 0.5
     }
 
-    // ── The 6×7 month grid ─────────────────────────────────────────────
     MonthGrid {
         id: grid
         anchors.left: gridLeftLine.right
@@ -204,8 +191,6 @@ Item {
                 return "transparent";
             }
 
-            // Day number, top-right corner. The circle is the today
-            // highlight — it sits behind the number when isToday is true.
             Item {
                 id: dayBadge
                 anchors.top: parent.top
@@ -235,11 +220,9 @@ Item {
                 }
             }
 
-            // Events for this day — fetched lazily; the binding tracks
-            // `eventsModel.eventsByDate` (reassigned wholesale on each
-            // refresh), so cells auto-update when sync completes.
-            // Filter chips by the provider's `searchQuery` (lowercase
-             // substring on the event summary). Empty query → all events.
+            // Cells auto-update when sync completes because `eventsByDate`
+            // is reassigned wholesale on each refresh. Filter by lowercase
+            // substring against the provider's searchQuery.
             readonly property var events: {
                 if (!root.provider || !root.provider.eventsModel) return [];
                 const all = root.provider.eventsModel.eventsFor(cell.model.date);
@@ -268,10 +251,8 @@ Item {
                     model: cell._overflow
                         ? cell.events.slice(0, cell._maxChips - 1)
                         : cell.events
-                    // Each chip: subtle accent-tinted background with a
-                    // 2px calendar-coloured stripe on the left (falling
-                    // back to theme.accent when the calendar has no
-                    // colour metadata). `clip: true` keeps the stripe
+                    // 2px stripe uses the calendar's colour, falls back
+                    // to theme.accent. `clip: true` keeps the stripe
                     // inside the rounded corners.
                     delegate: Rectangle {
                         id: chip
@@ -283,9 +264,6 @@ Item {
                         color: root._chipBg(chipArea.containsMouse)
                         opacity: cell.inMonth ? 1.0 : 0.55
 
-                        // Click → push this event into the provider's
-                        // selectedEvent slot, which the right-hand pane
-                        // (declared below) is bound to.
                         MouseArea {
                             id: chipArea
                             anchors.fill: parent
@@ -306,8 +284,6 @@ Item {
                             }
                         }
 
-                        // Time (timed events only) — right-aligned, bold.
-                        // All-day events skip it entirely.
                         Text {
                             id: timeText
                             anchors.right: parent.right
@@ -327,8 +303,6 @@ Item {
                             font.bold: true
                         }
 
-                        // Title — left-aligned, elided. Reserves room
-                        // for the time on the right when present.
                         Text {
                             anchors.left: parent.left
                             anchors.leftMargin: 6
@@ -355,7 +329,6 @@ Item {
                 }
             }
 
-            // Right + bottom borders form the inner grid lines.
             Rectangle {
                 anchors.right: parent.right
                 anchors.top: parent.top
@@ -375,12 +348,9 @@ Item {
         }
     }
 
-    // ── Right-side details pane (visible when an event is selected) ────
-    // The pane stays mounted; its width animates between 0 and the
-    // open size. Calendar elements above anchor to `detailsDivider.left`
-    // unconditionally — when width collapses to 0 the divider's own
-    // width drops to 0 too, putting its left edge at parent.right and
-    // letting the calendar expand to fill the whole pane.
+    // detailsDivider's width collapses to 0 when the pane is hidden,
+    // pinning its left edge at parent.right so the calendar fills the
+    // pane (everything above anchors to detailsDivider.left).
     Rectangle {
         id: detailsDivider
         anchors.right: detailsPane.left
@@ -401,6 +371,7 @@ Item {
         clip: true
         theme: root.theme
         fontFamily: root.fontFamily
+        provider: root.provider
         event: root.provider ? root.provider.selectedEvent : null
         onClose: if (root.provider) root.provider.selectEvent(null)
         // Clicking a description URL: ask the launcher to fully close

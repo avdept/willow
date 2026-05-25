@@ -17,45 +17,35 @@ import Quickshell.Io
 Provider {
     id: prov
 
-    // ── Identity ─────────────────────────────────────────────────────────
     name: "GitHub"
     tag: "github"
     iconText: ""
     description: "Search PRs, issues, and repos"
     shortcuts: ["gh", "github"]
 
-    // ── Launcher-facing config ───────────────────────────────────────────
-    // `detailsEnabled` flips on once the auth check passes; until then
-    // (and forever, if auth fails) the side-by-side details pane is
-    // suppressed and the popup uses the launcher's default width.
+    // detailsEnabled flips on once auth passes; until then the details
+    // pane is suppressed and the popup uses the launcher default width.
     detailsEnabled: false
     detailWidth: 420
     requestedWidth: _ghReady ? 1080 : 0
 
-    // ── Cached list data (populated at startup, reused across opens) ─────
     property var _prs: []
     property var _issues: []
     property var _projects: []
     property var _repos: []
-    property string _viewerLogin: ""   // for personal-project avatars
-    property int _pending: 0           // open initial-list `gh` calls
+    property string _viewerLogin: ""
+    property int _pending: 0
 
-    // ── Per-URL detail cache ─────────────────────────────────────────────
     property var _detailCache: ({})
-    // Wait this long after the selection settles before firing the detail
-    // call. Stops a fetch per row when the user sweeps the mouse.
+    // Debounce a selection sweep — without it, mouse-hover scrolls fire
+    // a detail fetch per row.
     readonly property int _fetchDebounceMs: 300
 
-    // True once `gh auth status` succeeds. Until then (and forever, if it
-    // fails) the list fetches don't run and the empty-state surfaces a
-    // remediation hint. Re-checked once per launcher startup.
+    // True once `gh auth status` succeeds. Gates list fetches; empty
+    // state surfaces a remediation hint if it stays false.
     property bool _ghReady: false
 
     Component.onCompleted: _checkAuth()
-
-    // ════════════════════════════════════════════════════════════════════
-    // gh availability / auth check
-    // ════════════════════════════════════════════════════════════════════
 
     function _checkAuth() {
         emptyStateText = "Checking GitHub CLI…";
@@ -100,10 +90,6 @@ Provider {
         results = [];
         emptyStateText = state === "MISSING" ? "GitHub CLI (`gh`) is not installed — install the `github-cli` package to enable this category." : "Not signed in to GitHub — run `gh auth login` in a terminal, then restart Quickshell.";
     }
-
-    // ════════════════════════════════════════════════════════════════════
-    // Initial-list fetches
-    // ════════════════════════════════════════════════════════════════════
 
     function _refetchAll() {
         _prs = [];
@@ -268,10 +254,6 @@ Provider {
         }
     }
 
-    // ════════════════════════════════════════════════════════════════════
-    // Search, row rendering, activation
-    // ════════════════════════════════════════════════════════════════════
-
     // Baseline score when no query is typed — PRs first, repos last.
     // Within each kind, items keep their fetch order (gh returns by recency).
     readonly property var _KIND_BASE: ({
@@ -306,29 +288,22 @@ Provider {
         })
 
     function search(text) {
-        const q = (text || "").toLowerCase().trim();
+        const q = norm(text);
         const out = [];
 
         function _emit(it, i) {
-            const lcTitle = it.title.toLowerCase();
-            const lcRepo = (it.repo || it.title).toLowerCase();
-            const lcDesc = (it.desc || "").toLowerCase();
-            let score;
-            if (q.length === 0)
-                score = _KIND_BASE[it.kind] - i;
-            else if (lcTitle === q)
-                score = 1000;
-            else if (lcTitle.startsWith(q))
-                score = 700;
-            else if (lcTitle.indexOf(q) !== -1)
-                score = 400;
-            else if (lcRepo.indexOf(q) !== -1)
-                score = 200;
-            else if (it.kind === "repo" && lcDesc.indexOf(q) !== -1)
-                score = 80;
-            else
-                return;
-            out.push(_toRow(it, score));
+            let s;
+            if (q.length === 0) {
+                s = _KIND_BASE[it.kind] - i;
+            } else {
+                // Repos get description as a secondary; other kinds only
+                // try title + repo path. Matches old behavior.
+                s = it.kind === "repo"
+                    ? scoreText(q, norm(it.title), norm(it.repo || it.title), norm(it.desc || ""))
+                    : scoreText(q, norm(it.title), norm(it.repo || it.title));
+                if (s <= 0) return;
+            }
+            out.push(_toRow(it, s));
         }
 
         for (const list of [_prs, _issues, _projects, _repos])
@@ -376,21 +351,10 @@ Provider {
         const url = result?.data?.url;
         if (!url)
             return;
-        openProc.command = ["xdg-open", url];
-        if (openProc.running)
-            openProc.running = false;
-        openProc.running = true;
+        openExternal(["xdg-open", url]);
     }
 
-    Process {
-        id: openProc
-        running: false
-    }
-
-    // ════════════════════════════════════════════════════════════════════
-    // Details pane — selection → debounce → graphql → render
-    // ════════════════════════════════════════════════════════════════════
-
+    // Details pane: selection → debounce → graphql → render.
     onSelectedRowChanged: _onSelectionChanged()
 
     function _onSelectionChanged() {

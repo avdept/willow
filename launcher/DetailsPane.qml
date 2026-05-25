@@ -67,7 +67,6 @@ Item {
         spacing: 10
         visible: pane._hasDetail
 
-        // ── Header: avatar + title/subtitle ──────────────────────────
         Row {
             width: parent.width
             spacing: 10
@@ -146,7 +145,6 @@ Item {
             font.pixelSize: 11
         }
 
-        // ── State pill ───────────────────────────────────────────────
         Item {
             width: stateText.implicitWidth + 16
             height: 20
@@ -173,7 +171,6 @@ Item {
             }
         }
 
-        // ── Meta rows ────────────────────────────────────────────────
         Column {
             width: parent.width
             spacing: 3
@@ -206,7 +203,6 @@ Item {
             }
         }
 
-        // ── Body ─────────────────────────────────────────────────────
         Rectangle {
             width: parent.width
             height: bodyScroll.implicitHeight > 0

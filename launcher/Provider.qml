@@ -1,169 +1,180 @@
-// Base type for a launcher provider. Subclass this in its own .qml file and
-// override `search()` and `activate()`. The Launcher binds `query` to the
-// search input and reads `results` whenever it changes.
-//
-// Result schema (each entry in `results`):
-//   {
-//     title:    "Visible name",
-//     subtitle: "Path / description",
-//     iconUrl:  "file:///… or image://icon/…",  // ready-to-bind Image source
-//     iconText: "",                              // optional nerd-font fallback
-//     score:    0.0,                             // higher = better; sorted desc
-//     data:     { ... }                          // provider-private payload
-//   }
+// Base type for a launcher provider. Subclass, override `search()` and
+// `activate()`. See PROVIDERS.md for the result schema and contract.
 
 import QtQuick
+import Quickshell.Io
 
 QtObject {
     id: provider
 
-    // QtObject has no default child property; declare one so subclasses can
-    // include `Timer {}`, `Process {}`, `Connections {}`, etc. as children.
+    // Default children list lets subclasses add Timer / Process / Connections
+    // — QtObject has no default property otherwise.
     default property list<QtObject> _children
 
-    // ── Identity ─────────────────────────────────────────────────────────
-    property string name: "Provider"
-    property string tag: name           // short label shown on result rows
-    property string iconText: ""        // nerd-font glyph for menu/fallback
-    property string description: ""     // subtitle in the top-level menu
+    property Process _extProc: Process { running: false }
 
-    // Optional live category icon. When set, the launcher renders this
-    // Component in the icon slot of category rows (and as the per-row
-    // fallback) instead of the static `iconText` glyph. The component
-    // gets `theme` and `fontFamily` injected on load and is expected to
-    // anchor.fill its parent (the icon box, default 48×48).
+    property string name: "Provider"
+    property string tag: name
+    property string iconText: ""
+    property string description: ""
+
     property Component iconComponent: null
 
-    // If non-empty, the provider only runs when the query is exactly `prefix`
-    // or starts with `prefix + " "` (e.g. "f foo"). Empty = always active.
+    // Empty = always active. Otherwise the provider only runs when the
+    // query is exactly `prefix` or starts with `prefix + " "`.
     property string prefix: ""
 
-    // Drill-in shortcuts. When the launcher is in menu mode and the
-    // user types `<shortcut> <rest>` (or just `<shortcut> `), it
-    // enters this provider with `<rest>` as the initial query. Useful
-    // for keyboard-only navigation. Each shortcut is matched
-    // case-insensitively. Empty list = no shortcuts.
+    // Typed shortcuts that drill into this provider from menu mode.
+    // `shortcuts` triggers on `<sc> <rest>`; `actionShortcuts` also
+    // invokes `invokeAction(name, rest)` (matches exactly OR with a
+    // trailing space — "+t" alone fires "new"). Case-insensitive.
+    // Both keys share a namespace; launcher warns on collision.
     property list<string> shortcuts: []
-
-    // Action shortcuts: typed prefix → action name. When the
-    // launcher input matches one of these keys (exactly OR followed
-    // by a space), it drills into this provider AND calls
-    // `invokeAction(name, rest)` so the provider can do something
-    // beyond just opening its view. Keys are case-insensitive and
-    // share a namespace with `shortcuts` across all providers — the
-    // launcher warns at startup if any key is declared twice.
-    //
-    // Example (subclass):
-    //   actionShortcuts: ({ "+t": "new" })
-    //   function invokeAction(name, rest) {
-    //       if (name === "new") openForm(...);
-    //   }
     property var actionShortcuts: ({})
 
-    // Optional override of the search placeholder when in this provider.
-    // Useful for providers with internal sub-views (e.g. Style → Theme).
-    // When empty, the launcher falls back to `name`.
     property string currentTitle: ""
-
-    // Optional override for the empty-state message shown in the right
-    // pane when `results` is empty. Use this for loading / error states
-    // (e.g. "Loading PRs…" while a `gh` call is in flight). When empty,
-    // the launcher uses its default "Start typing…" / "No results".
     property string emptyStateText: ""
 
-    // Optional: opt-in to a side-by-side details pane in the right area.
-    // When true, the launcher splits the results pane: list on the left,
-    // details on the right. The provider writes `detail` (see schema in
-    // DetailsPane.qml) and observes `selectedRow` to know what to fetch.
+    // Opt-in side-by-side details pane. Provider writes `detail` (shape
+    // in DetailsPane.qml) on `selectedRow` change.
     property bool detailsEnabled: false
-    property int detailWidth: 380         // px reserved for the details pane
-    // Provider populates this with the loaded detail (see DetailsPane.qml
-    // for the expected shape). Empty / null = nothing selected.
+    property int detailWidth: 380
     property var detail: null
-    // Launcher writes the raw provider result (`r`, as returned by
-    // search()) of the currently highlighted row whenever the selection
-    // changes. Providers should override `onSelectedRowChanged` to fetch
-    // details for that row.
     property var selectedRow: null
 
-    // Optional: providers (or their sub-views) can request a different
-    // popup width/height. 0 means "use the launcher default". The
-    // launcher animates between values so changing these on a view
-    // switch is fine.
+    // 0 = launcher default. Animated by the launcher on change.
     property int requestedWidth: 0
     property int requestedHeight: 0
 
-    // Optional: how the launcher should render this provider's results
-    // in the right pane.
-    //   "list"   — vertical list of rows (default; uses ResultDelegate)
-    //   "grid"   — tiled cells with preview + label (uses ResultGridCell)
-    //   "custom" — provider draws the whole right pane via `customComponent`
+    //   "list"   — ResultDelegate rows (default)
+    //   "grid"   — ResultGridCell tiles
+    //   "custom" — provider draws the whole right pane via customComponent
     property string resultsLayout: "list"
-
-    // Grid params — read only when resultsLayout === "grid".
     property int gridColumns: 4
     property int cellHeight: 160
-
-    // When `resultsLayout === "custom"`, the launcher renders this
-    // Component into the right pane and passes `theme`, `fontFamily`,
-    // and `provider` (this object) through to it. The component drives
-    // its own layout, keyboard handling, and activation.
     property Component customComponent: null
 
-    // ── Wiring ───────────────────────────────────────────────────────────
-    property string query: ""       // set by Launcher
-    property var results: []        // populated by subclass
+    property string query: ""
+    property var results: []
 
-    // Emitted by providers that manage internal sub-views, when they push
-    // or pop a view. The launcher listens and clears the search query so
-    // each view starts fresh.
+    // Bound by Launcher.qml. Providers should gate background
+    // timers/process spawns on this for laptop power.
+    property bool launcherOpen: false
+
     signal viewChanged()
-
-    // Emitted when the provider wants the launcher to fully close (e.g.
-    // a calendar event chip's URL was just opened — keeping the launcher
-    // around would steal focus from the browser). The launcher wires
-    // this to `hide()` at construction time.
     signal requestClose()
-
-    // Ask the launcher to drill into a sibling provider by `name` (the
-    // value of that provider's `name` property), with an optional
-    // initial query. The launcher wires this generically — useful for
-    // dashboard tiles (NowProvider → Todos) or search activations that
-    // should hand off to another provider's view.
     signal requestEnter(string providerName, string initialQuery)
 
-    // ── Contract (override in subclass) ──────────────────────────────────
     function search(text) {}
-    // Return a truthy value to keep the launcher open after activation
-    // (e.g. theme picks where you want to see the new colors live).
-    // Return falsy / nothing for the default behaviour: launcher hides.
+    // Return truthy to keep the launcher open after activation.
     function activate(result) {}
-
-    // Override to handle an action shortcut. `name` is the value of
-    // the matched key in `actionShortcuts`; `rest` is whatever the
-    // user typed after the shortcut (useful as a draft name, etc.).
     function invokeAction(name, rest) {}
-
-    // Optional: providers with internal sub-views override this. Return
-    // true when the back was handled internally (the launcher then just
-    // refreshes results); return false to let the launcher exit the
-    // provider and return to the category menu.
+    // Return true if the back was handled internally (launcher just
+    // refreshes); false to exit the provider.
     function goBack() { return false }
-
-    // Optional: clear any internal sub-view state. Called by the launcher
-    // when it returns to the category menu or closes, so the next
-    // drill-in starts at the provider's root view.
     function reset() {}
-
-    // Optional: intercept keyboard input before the launcher's default
-    // arrow/enter/escape handling. Only called when this provider is
-    // active and uses a custom layout. Return true if the event was
-    // handled (the launcher will mark it accepted).
+    // Return true to consume the key before the launcher's defaults.
+    // Only called for `resultsLayout: "custom"` providers.
     function handleKey(event) { return false }
 
-    // ── Helpers (do not override) ────────────────────────────────────────
+    // Launch an external command that survives `killall qs`. Default
+    // routes through `hyprctl dispatch exec` so the spawn is reparented
+    // to Hyprland. `opts.detach: "none"` skips that wrap; `opts.cwd`
+    // sets a working directory.
+    function openExternal(argv, opts) {
+        const o = opts || {};
+        const detach = o.detach || "hypr";
+        const cwd = o.cwd || "";
+        const arr = Array.isArray(argv) ? argv : [argv];
+        const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'";
 
-    // Returns the query stripped of this provider's prefix, or null when the
+        if (_extProc.running) _extProc.running = false;
+
+        if (detach === "hypr") {
+            const inner = arr.map(q).join(" ");
+            const line = cwd ? ("cd " + q(cwd) + " && exec " + inner) : inner;
+            _extProc.workingDirectory = "";
+            _extProc.command = ["hyprctl", "dispatch", "exec", line];
+        } else {
+            _extProc.workingDirectory = cwd;
+            _extProc.command = arr;
+        }
+        _extProc.running = true;
+    }
+
+    // ── Scoring helpers (shared ladder for cross-provider ranking) ──────
+    //
+    // CONTRACT: callers MUST pre-norm inputs (toLowerCase().trim()).
+    // BANDS: 1000 exact, 500-549 prefix, 200-280 word-initials,
+    //        100 substring, 20 subsequence, 0 no-match.
+    // Multiply (×0.4 for secondary fields, ×1.5 for "current") but
+    // never invent new band magnitudes.
+
+    function norm(s) { return (s || "").toString().toLowerCase().trim(); }
+
+    function scoreText(q, primary) {
+        if (!q) return 0;
+        let best = _scoreOne(primary || "", q);
+        for (let i = 2; i < arguments.length; i++) {
+            const s = _scoreOne(arguments[i] || "", q) * 0.4;
+            if (s > best) best = s;
+        }
+        return best;
+    }
+
+    function scorePath(q, path) {
+        if (!q || !path) return 0;
+        const slash = path.lastIndexOf("/");
+        const base = slash >= 0 ? path.slice(slash + 1) : path;
+        const primary = _scoreOne(base, q);
+        const fallback = _scoreOne(path, q) * 0.3;
+        return primary > fallback ? primary : fallback;
+    }
+
+    function _scoreOne(h, q) {
+        if (h.length === 0) return 0;
+        if (h === q) return 1000;
+        if (h.startsWith(q)) {
+            const len = h.length < 50 ? h.length : 50;
+            return 500 + (50 - len);
+        }
+        const wb = _wordInitials(h, q);
+        if (wb > 0) return 200 + wb;
+        if (h.indexOf(q) !== -1) return 100;
+        if (_isSubsequence(h, q)) return 20;
+        return 0;
+    }
+
+    function _wordInitials(name, q) {
+        const parts = name.split(/[\s\-_./]+/);
+        let qi = 0, hit = 0;
+        for (let i = 0; i < parts.length && qi < q.length; i++) {
+            if (parts[i].length === 0) continue;
+            if (parts[i][0] === q[qi]) { qi++; hit++; }
+        }
+        return qi === q.length ? hit * 10 : 0;
+    }
+
+    function _isSubsequence(haystack, needle) {
+        let i = 0;
+        for (let j = 0; j < haystack.length && i < needle.length; j++)
+            if (haystack[j] === needle[i]) i++;
+        return i === needle.length;
+    }
+
+    // HTML-escape `text` and wrap http(s) URLs in <a> tags so a Text
+    // with `textFormat: RichText` renders them as clickable links.
+    function linkify(text) {
+        if (!text) return "";
+        const esc = text.toString()
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
+        return esc.replace(/(https?:\/\/[^\s<>"']+)/g, '<a href="$1">$1</a>');
+    }
+
+    // Strips this provider's prefix from `query`. Returns null when the
     // current query doesn't match the prefix gate.
     function effectiveQuery() {
         const q = (query || "").trim();
@@ -173,9 +184,6 @@ QtObject {
         return q.indexOf(p) === 0 ? q.slice(p.length) : null;
     }
 
-    // Force a search with the current query, even if the value hasn't
-    // changed. Used by Launcher when entering a provider, to guarantee a
-    // populated result set.
     function refresh() {
         const eq = effectiveQuery();
         if (eq === null) { results = []; return; }

@@ -1,24 +1,11 @@
-// Launcher — floating, layer-shell window with a search input and a
-// layered body:
+// Floating layer-shell launcher. Menu mode = full-width categories;
+// provider mode = icon rail + results pane (+ optional details pane).
 //
-//   • menu mode: the categories list spans the full body width.
-//   • provider mode: the categories list shrinks to an icon-only rail on
-//     the left, the active provider's results fill the rest. If the
-//     provider opted into `detailsEnabled`, a third pane appears on the
-//     right showing per-selection details (DetailsPane.qml).
+// IPC: `qs ipc call launcher toggle` (also `show` and `hide`).
 //
-// The categories-list right edge animates between modes (slides left on
-// drill-in), and the card width/height animate with provider requests.
-//
-// Open / close via IPC:
-//   qs ipc call launcher toggle
-//   qs ipc call launcher show
-//   qs ipc call launcher hide
-//
-// Adding a provider:
-//   1. Drop a new QML file under launcher/ that inherits Provider.
-//   2. Instantiate it in the Providers block below.
-//   3. Add its id to the `providers` array in Component.onCompleted.
+// Adding a provider: drop a QML file under launcher/, instantiate it
+// below, add to the `providers` array. See PROVIDERS.md for the
+// subclass contract.
 
 import QtQuick
 import QtQuick.Effects
@@ -31,41 +18,28 @@ import "launcher/todos"
 PanelWindow {
     id: launcher
 
-    // ── Theme (set by parent) ────────────────────────────────────────────
     required property var theme
     required property string fontFamily
 
-    // ── Layout constants ─────────────────────────────────────────────────
     readonly property int defaultCardWidth:  640
     readonly property int defaultCardHeight: 640
     readonly property int searchRowHeight:   56
     readonly property int footerHeight:      28
     readonly property int dividerHeight:     1
-    readonly property int categoryRailWidth: 64      // narrowed-categories width
+    readonly property int categoryRailWidth: 64
     readonly property int collapseAnimDuration: 260
-    // Hard caps as a fraction of the screen (the launcher window covers
-    // the whole screen, so width/height are the screen dimensions).
-    // Anything a provider requests is clamped down to these.
+    // Hard caps as a fraction of screen size; provider requests are clamped.
     readonly property real maxWidthRatio:  0.70
     readonly property real maxHeightRatio: 0.80
-    // Card background alpha (1.0 = opaque). Affects the popup card only,
-    // not the layer-shell parent (which is always transparent).
     readonly property real cardAlpha: 0.95
 
-    // Animated card size — bound below to either the defaults or the
-    // active provider's `requestedWidth` / `requestedHeight`, clamped.
     property int cardWidth: defaultCardWidth
     property int cardHeight: defaultCardHeight
-
-    // Animated width of the categories pane. Body width in menu mode (full),
-    // categoryRailWidth in provider mode. Its right edge is the visible
-    // divider that slides from right to left when drilling in.
-    property real categoryListWidth: cardWidth        // overridden by binding below
+    property real categoryListWidth: cardWidth
 
     function _clampWidth(req)  { return Math.min(req, Math.round(width  * maxWidthRatio));  }
     function _clampHeight(req) { return Math.min(req, Math.round(height * maxHeightRatio)); }
 
-    // ── State ────────────────────────────────────────────────────────────
     property bool open: false
     property string mode: "menu"          // "menu" | "provider"
     property int activeProvIdx: -1
@@ -73,27 +47,22 @@ PanelWindow {
     property int currentIndex: 0
     property var providers: []
 
-    // Left pane: categories OR aggregated results (in menu mode with a query).
+    // leftModel = categories OR aggregated results (menu mode + query).
+    // rightModel = active provider's results.
     property var leftModel: []
-    // Right pane: active provider's results.
     property var rightModel: []
-
-    // The list that owns the keyboard selection.
     readonly property var activeModel: mode === "provider" ? rightModel : leftModel
 
-    // ── Window setup ─────────────────────────────────────────────────────
     anchors { top: true; left: true; right: true; bottom: true }
     exclusionMode: ExclusionMode.Ignore
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.keyboardFocus: open ? WlrKeyboardFocus.OnDemand : WlrKeyboardFocus.None
-    // Namespace lets Hyprland match a `layerrule = blur, …` so the
-    // compositor can backdrop-blur what's behind the popup. Pair this
-    // with `cardAlpha < 1.0` to actually see the blur.
+    // Namespace lets Hyprland match a `layerrule = blur, …`. Pair with
+    // cardAlpha < 1.0 to actually see the blur.
     WlrLayershell.namespace: "quickshell-launcher"
     color: "transparent"
     visible: open
 
-    // ── IPC ──────────────────────────────────────────────────────────────
     IpcHandler {
         target: "launcher"
         function toggle() { launcher.open ? launcher.hide() : launcher.show() }
@@ -120,19 +89,16 @@ PanelWindow {
         id: ghProv
         onResultsChanged: launcher._onProviderResults(4)
         onDetailChanged:  launcher._onProviderDetailChanged(4)
-        // The provider flips `detailsEnabled` async after its `gh auth`
-        // probe lands; re-sync the launcher's layout if we're showing
-        // this category at that moment. (cardWidth is bound to
-        // `requestedWidth` directly, so it doesn't need a handler.)
+        // detailsEnabled flips async after the `gh auth` probe lands;
+        // resync layout if the user is on this category at that moment.
         onDetailsEnabledChanged: if (launcher.activeProvIdx === 4) launcher._syncRightLayout()
     }
     CalendarProvider { id: calProv; onResultsChanged: launcher._onProviderResults(5) }
     TodoProvider {
         id: todoProv
         onResultsChanged: launcher._onProviderResults(6)
-        // When the new-todo form closes, the focused TextInput is hidden
-        // and Qt drops focus entirely. Restore it to the launcher's
-        // search field so the user can keep typing / hit Esc to leave.
+        // When the form closes, the focused TextInput is hidden and Qt
+        // drops focus entirely. Restore it to the search field.
         onFormOpenChanged: if (!formOpen) Qt.callLater(() => searchField.forceActiveFocus())
     }
 
@@ -141,13 +107,10 @@ PanelWindow {
         for (let i = 0; i < providers.length; i++) {
             const p = providers[i];
             if (!p) continue;
-            // Any provider can ask the launcher to close itself (e.g.
-            // after opening a URL externally).
             if (p.requestClose)
                 p.requestClose.connect(launcher.hide);
-            // Cross-provider drill-in: provider names map to indices
-            // here, callLater so the requesting activate() finishes
-            // before we mutate launcher state.
+            // callLater so the requesting activate() finishes before we
+            // mutate launcher state.
             if (p.requestEnter)
                 p.requestEnter.connect((name, query) => {
                     const idx = launcher.providers.findIndex(x => x && x.name === name);
@@ -159,7 +122,11 @@ PanelWindow {
         _computeLeft();
     }
 
-    // ── State transitions ────────────────────────────────────────────────
+    onOpenChanged: {
+        for (let i = 0; i < providers.length; i++)
+            if (providers[i]) providers[i].launcherOpen = open;
+    }
+
     function show() {
         _resetState();
         _computeLeft();
@@ -190,8 +157,6 @@ PanelWindow {
         enterProviderById(item._provIdx, "");
     }
 
-    // Drill into a provider directly (used by category clicks and by
-    // typed-shortcut detection — see onQueryTextChanged below).
     function enterProviderById(provIdx, initialQuery) {
         const p = providers[provIdx];
         if (!p) return;
@@ -202,23 +167,19 @@ PanelWindow {
         p.query = queryText;
         p.refresh();
         _syncRightLayout();
-        _computeLeft();                   // rebuild left as static category list
+        _computeLeft();
         _refreshProviderResults();
     }
 
-    // Returns { provIdx, rest, action? } if `text` matches one of any
-    // provider's plain `shortcuts` (followed by a space) or
-    // `actionShortcuts` (exact match OR followed by a space).
-    // Action matches include `action: "<name>"` which the caller
-    // forwards to `provider.invokeAction(name, rest)` after drill-in.
+    // Returns { provIdx, rest, action? } for the first matching shortcut.
+    // `actionShortcuts` allow exact match (so "+t" alone fires);
+    // `shortcuts` require a trailing space (so "t" doesn't hijack queries).
     function _matchShortcut(text) {
         const lc = (text || "").toLowerCase();
         for (let i = 0; i < providers.length; i++) {
             const p = providers[i];
             if (!p) continue;
 
-            // Action shortcuts (exact match allowed since prefixes like
-            // "+t" are intentional triggers, not query starts).
             const actions = p.actionShortcuts || {};
             for (const key in actions) {
                 const sc = (key || "").toLowerCase();
@@ -229,8 +190,6 @@ PanelWindow {
                     return { provIdx: i, rest: text.slice(sc.length + 1), action: actions[key] };
             }
 
-            // Plain drill-in shortcuts (trailing space required so
-            // typing "t" alone doesn't hijack an actual query).
             const list = p.shortcuts;
             if (!list) continue;
             for (let j = 0; j < list.length; j++) {
@@ -243,11 +202,9 @@ PanelWindow {
         return null;
     }
 
-    // Warn (at startup) about any shortcut key declared by more than
-    // one provider. Plain `shortcuts` and `actionShortcuts` keys share
-    // a single case-insensitive namespace, since both feed
-    // `_matchShortcut` and only the first hit wins. Warnings only —
-    // first match still fires at runtime.
+    // Warn at startup about shortcut keys claimed by multiple providers.
+    // Plain and action shortcuts share a single namespace; first match
+    // wins at runtime.
     function _validateShortcuts() {
         const seen = ({});
         for (let i = 0; i < providers.length; i++) {
@@ -292,9 +249,7 @@ PanelWindow {
     }
 
     function backToMenu() {
-        // Preserve the highlight on the category we're returning from,
-        // so escape / empty-backspace lands on the same row in the menu
-        // instead of snapping back to the first category.
+        // Preserve the highlight so escape lands on the same row.
         const last = activeProvIdx;
         _resetState();
         _computeLeft();
@@ -303,7 +258,6 @@ PanelWindow {
 
     function goBack() {
         if (mode === "provider") {
-            // Let the active provider pop any internal sub-view first.
             const p = providers[activeProvIdx];
             if (p && p.goBack && p.goBack()) return;
             backToMenu();
@@ -316,33 +270,20 @@ PanelWindow {
         const model = activeModel;
         if (currentIndex < 0 || currentIndex >= model.length) return;
         const item = model[currentIndex];
-        // In menu mode a chevron row is a category — drill in.
         if (mode === "menu" && item.chevron) { enterProvider(currentIndex); return; }
         const p = providers[item._provIdx];
-        // Providers can return truthy from activate() to keep us open
-        // (e.g. live theme/font previews where the user is iterating).
         let keepOpen = false;
         if (p && item._result) keepOpen = !!p.activate(item._result);
-        // Chevron rows inside a provider are sub-sections (e.g. Style →
-        // Theme). Those keep the launcher open already; plus anything
-        // the provider explicitly asked to hold open.
         if (!item.chevron && !keepOpen) hide();
     }
 
-    // Active layout for the right pane. Set explicitly via
-    // `_syncRightLayout()` whenever the active provider or its view
-    // changes, since binding through `providers[activeProvIdx]` isn't a
-    // reliable property-change dependency for QML's binding engine.
+    // Explicit state instead of bindings through providers[activeProvIdx]
+    // — QML can't reliably track property changes through a var-array lookup.
     property string rightLayout: "list"
     property int rightGridColumns: 1
     property int rightCellHeight: 160
-    // Details-pane support — true when the active provider opts in.
     property bool detailsEnabled: false
     property int detailsWidth: 0
-    // Mirrors active provider's `detail`, set explicitly via the
-    // provider's onDetailChanged handler. Going through this stable
-    // property avoids relying on `providers[activeProvIdx].detail` —
-    // QML binding tracking through a `var` array lookup is unreliable.
     property var currentDetail: null
 
     function _syncRightLayout() {
@@ -361,20 +302,16 @@ PanelWindow {
                          : "list";
         rightGridColumns = Math.max(1, p.gridColumns || 4);
         rightCellHeight  = Math.max(1, p.cellHeight  || 160);
-        // Custom layouts handle their own selection; suppress details.
         detailsEnabled   = rightLayout !== "custom" && p.detailsEnabled === true;
         detailsWidth     = detailsEnabled ? Math.max(200, p.detailWidth || 380) : 0;
         currentDetail    = detailsEnabled ? p.detail : null;
     }
 
-    // The active provider just pushed a new `detail` blob.
     function _onProviderDetailChanged(idx) {
         if (idx === activeProvIdx && detailsEnabled)
             currentDetail = providers[idx]?.detail ?? null;
     }
 
-    // Whenever the highlighted result changes inside a details-enabled
-    // provider, push the raw row data into the provider so it can fetch.
     function _syncSelectedRow() {
         if (!detailsEnabled || mode !== "provider") return;
         const p = providers[activeProvIdx];
@@ -400,8 +337,6 @@ PanelWindow {
         }
     }
 
-    // ── Model construction ───────────────────────────────────────────────
-
     function _resultRow(provIdx, p, r) {
         const isChev = r.chevron === true;
         return {
@@ -409,24 +344,12 @@ PanelWindow {
             subtitle:    r.subtitle,
             iconUrl:     r.iconUrl,
             iconText:    r.iconText || p.iconText,
-            // Live category icon — provider falls back to its own when the
-            // row didn't bring one. Result rows in aggregated menu-mode
-            // searches inherit the provider's component this way.
             iconComponent: r.iconComponent || p.iconComponent,
-            // Chevron rows in provider results (e.g. Style → Theme) are
-            // sub-section entries — render them as menu rows, not tagged
-            // results.
+            // Chevron rows are sub-sections (e.g. Style → Theme) — no tag pill.
             providerTag: isChev ? "" : (r.providerTag ?? p.tag),
             chevron:     isChev,
-            // Optional per-row override for the title's font family
-            // (e.g. the Font picker renders each name in its own font).
-            // "" means use the launcher's default font.
             titleFont:   r.titleFont || "",
-            // Optional pill color name — see ResultDelegate for the
-            // supported strings. "" = muted default.
             tagColor:    r.tagColor || "",
-            // Provider-private payload — read by grid delegates (e.g. to
-            // mark the current theme) and dispatched back to `activate()`.
             data:        r.data,
             _provIdx:    provIdx,
             _result:     r,
@@ -452,7 +375,6 @@ PanelWindow {
     function _computeLeft() {
         const out = [];
         if (mode === "menu" && queryText.trim().length > 0) {
-            // Aggregated results across all providers.
             for (let i = 0; i < providers.length; i++) {
                 const p = providers[i];
                 if (!p) continue;
@@ -461,8 +383,6 @@ PanelWindow {
             }
             out.sort((a, b) => b._score - a._score);
         } else {
-            // Categories — always rendered, even in provider mode (clipped
-            // to icon-only because the pane is narrow there).
             for (let i = 0; i < providers.length; i++)
                 if (providers[i]) out.push(_categoryRow(i, providers[i]));
         }
@@ -489,8 +409,6 @@ PanelWindow {
         else if (mode === "menu" && queryText.length > 0) _computeLeft();
     }
 
-    // A provider with internal sub-views just switched view — clear the
-    // query so the new view starts empty, and re-fetch its results.
     function _onProviderViewChanged() {
         queryText = "";
         currentIndex = 0;
@@ -506,10 +424,6 @@ PanelWindow {
     onQueryTextChanged: {
         currentIndex = 0;
         if (mode === "menu") {
-            // Typed-shortcut drill-in: "<sc> <rest>" auto-enters that
-            // provider with `<rest>` as the initial query. Action
-            // shortcuts additionally invoke a provider-defined action
-            // and pass `rest` to it (rather than using it as a filter).
             const sc = _matchShortcut(queryText);
             if (sc) {
                 enterProviderById(sc.provIdx, sc.action ? "" : sc.rest);
@@ -529,9 +443,6 @@ PanelWindow {
         }
     }
 
-    // ── UI ───────────────────────────────────────────────────────────────
-
-    // Click-outside dismiss
     MouseArea { anchors.fill: parent; onClicked: launcher.hide() }
 
     component HintText : Text {
@@ -567,18 +478,12 @@ PanelWindow {
 
         MouseArea { anchors.fill: parent; onClicked: {} }
 
-        // Drive the animated categoryListWidth: full body width in menu mode,
-        // categoryRailWidth in provider mode. The Behavior is what makes the
-        // right edge of the categories pane slide leftward on drill-in.
         Binding {
             target: launcher
             property: "categoryListWidth"
             value: launcher.mode === "provider" ? launcher.categoryRailWidth : body.width
         }
 
-        // Drive cardWidth/cardHeight: the active provider may request a
-        // wider or taller popup (e.g. Style → Theme wants room for a
-        // preview grid). The Behaviors below keep the resize smooth.
         Binding {
             target: launcher
             property: "cardWidth"
@@ -605,7 +510,6 @@ PanelWindow {
         Column {
             anchors.fill: parent
 
-            // ── Search row ───────────────────────────────────────────────
             Item {
                 width: parent.width
                 height: launcher.searchRowHeight
@@ -655,9 +559,8 @@ PanelWindow {
                     }
 
                     Keys.onPressed: function (event) {
-                        // Custom layouts intercept first — they own arrow
-                        // keys (calendar date nav, etc). Escape still
-                        // falls through to the launcher.
+                        // Custom layouts own arrow keys (calendar date nav etc).
+                        // Escape still falls through to the launcher.
                         if (launcher.mode === "provider"
                             && launcher.rightLayout === "custom"
                             && event.key !== Qt.Key_Escape) {
@@ -667,9 +570,6 @@ PanelWindow {
                                 return;
                             }
                         }
-                        // In grid layout, Up/Down jump by a full row and
-                        // Left/Right step through cells. In list layout,
-                        // Left/Right pass through to the text cursor.
                         const cols  = launcher.rightLayout === "grid" ? launcher.rightGridColumns : 1;
                         switch (event.key) {
                         case Qt.Key_Escape:    launcher.goBack();              event.accepted = true; break;
@@ -735,6 +635,7 @@ PanelWindow {
                             : launcher.activeProvIdx
                         theme: launcher.theme
                         fontFamily: launcher.fontFamily
+                        launcherOpen: launcher.open
                         onActivated: function (i) {
                             if (launcher.mode === "menu") {
                                 launcher.currentIndex = i;
@@ -802,6 +703,7 @@ PanelWindow {
                         currentIndex: launcher.mode === "provider" ? launcher.currentIndex : -1
                         theme: launcher.theme
                         fontFamily: launcher.fontFamily
+                        launcherOpen: launcher.open
                         onActivated: function (i) {
                             launcher.currentIndex = i;
                             launcher.activateCurrent();
@@ -858,6 +760,7 @@ PanelWindow {
                         currentIndex: launcher.mode === "provider" ? launcher.currentIndex : -1
                         theme: launcher.theme
                         fontFamily: launcher.fontFamily
+                        launcherOpen: launcher.open
                         onActivated: function (i) {
                             launcher.currentIndex = i;
                             launcher.activateCurrent();

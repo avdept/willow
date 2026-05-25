@@ -11,7 +11,6 @@ import Quickshell.Io
 QtObject {
     id: root
 
-    // ── Public state ────────────────────────────────────────────────────
     // Map: "yyyy-MM-dd" → array of event objects (see script docstring).
     property var eventsByDate: ({})
     property bool loading: false
@@ -47,7 +46,6 @@ QtObject {
         return eventsByDate[Qt.formatDate(d, "yyyy-MM-dd")] || _noEvents;
     }
 
-    // ── Internals ───────────────────────────────────────────────────────
     // Absolute path to the sibling Python helper; computed from this
     // file's URL so it works wherever the project is checked out.
     readonly property string _scriptPath:

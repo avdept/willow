@@ -16,14 +16,12 @@ Item {
     readonly property bool _formOpen: provider && provider.formOpen
     readonly property int _sidebarWidth: provider ? provider._sidebarWidth : 340
 
-    // Matches Launcher.collapseAnimDuration so the sidebar's
-    // width animation finishes in lockstep with the card's
-    // width animation — keeps the list column visually stable.
+    // Matches Launcher.collapseAnimDuration so sidebar and card width
+    // animations finish in lockstep — keeps the list column stable.
     readonly property int _slideDuration: 260
 
     clip: true
 
-    // ── Header ──────────────────────────────────────────────────────────
     Item {
         id: header
         anchors.left: parent.left
@@ -84,10 +82,8 @@ Item {
         opacity: 0.5
     }
 
-    // ── Todo list ───────────────────────────────────────────────────────
-    // The list's right edge anchors to the sidebar's left edge. As the
-    // card and sidebar widths animate in lockstep, sidebar.left stays
-    // put, so list width stays visually constant.
+    // List right edge anchors to sidebar.left; card and sidebar widths
+    // animate in lockstep so sidebar.left stays put.
     ListView {
         id: list
         anchors.left: parent.left
@@ -109,7 +105,7 @@ Item {
             x: 6
             height: Math.max(52, content.implicitHeight + 16)
             radius: 6
-            color: rowMa.containsMouse && root.theme
+            color: (rowMa.containsMouse || nameLinks.containsMouse) && root.theme
                 ? Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.08)
                 : "transparent"
 
@@ -119,18 +115,14 @@ Item {
             readonly property bool _hasTags: Array.isArray(row.modelData.tags) && row.modelData.tags.length > 0
             readonly property bool _hasMeta: _hasDue || _hasTags
 
-            // Row-level click → edit form. Declared first so it draws
-            // BELOW the checkbox; clicks on the checkbox hit the
-            // checkbox's own MouseArea instead.
+            // Declared first so it draws below the checkbox's own MouseArea.
             MouseArea {
                 id: rowMa
                 anchors.fill: parent
                 hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
                 onClicked: if (root.provider) root.provider.openForm(row.modelData.id)
             }
 
-            // Checkbox
             Rectangle {
                 id: check
                 width: 18
@@ -177,15 +169,48 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: 3
 
-                Text {
+                Item {
                     width: parent.width
-                    text: row.modelData.name || "(untitled)"
-                    color: root.theme ? root.theme.fg : "#000"
-                    font.family: root.fontFamily
-                    font.pixelSize: 14
-                    elide: Text.ElideRight
-                    opacity: row._done ? 0.5 : 1.0
-                    font.strikeout: row._done
+                    height: nameText.implicitHeight
+
+                    Text {
+                        id: nameText
+                        anchors.fill: parent
+                        text: root.provider ? root.provider.linkify(row.modelData.name || "(untitled)") : ""
+                        color: root.theme ? root.theme.fg : "#000"
+                        linkColor: root.theme ? root.theme.accent : "#1e66f5"
+                        textFormat: Text.RichText
+                        font.family: root.fontFamily
+                        font.pixelSize: 14
+                        elide: Text.ElideRight
+                        opacity: row._done ? 0.5 : 1.0
+                        font.strikeout: row._done
+                    }
+
+                    // Intercept link clicks; non-link clicks fall through
+                    // to the row's edit-on-click MouseArea.
+                    MouseArea {
+                        id: nameLinks
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        propagateComposedEvents: true
+                        cursorShape: nameText.linkAt(mouseX, mouseY).length > 0
+                            ? Qt.PointingHandCursor
+                            : Qt.ArrowCursor
+                        onPressed: mouse => {
+                            if (nameText.linkAt(mouse.x, mouse.y).length === 0)
+                                mouse.accepted = false;
+                        }
+                        onClicked: mouse => {
+                            const url = nameText.linkAt(mouse.x, mouse.y);
+                            if (url.length > 0 && root.provider) {
+                                root.provider.openExternal(["xdg-open", url]);
+                                root.provider.requestClose();
+                            } else {
+                                mouse.accepted = false;
+                            }
+                        }
+                    }
                 }
 
                 Text {
@@ -234,12 +259,9 @@ Item {
         }
     }
 
-    // ── Form sidebar ────────────────────────────────────────────────────
-    // Always anchored to the right edge. Width animates between 0 and
-    // _sidebarWidth in lockstep with the launcher's card-width
-    // animation (matching duration/easing), so the sidebar "unfolds"
-    // into the freshly-allocated space without ever overlapping the
-    // list. clip: true hides content while width is mid-animation.
+    // Width animates between 0 and _sidebarWidth in lockstep with the
+    // launcher's card-width animation; clip: true hides mid-animation
+    // content so the sidebar "unfolds" into freshly-allocated space.
     Item {
         id: formSidebar
         anchors.right: parent.right

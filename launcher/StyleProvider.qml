@@ -1,17 +1,7 @@
 // Style provider — mirrors the "Style" section of `omarchy-menu`.
-//
-// Top-level view shows one row per style section (Theme, Font, Unlock).
-// Each section drills into a sub-view:
-//   "themes"  — grid of preview thumbnails (omarchy-theme-{list,current,set})
-//   "fonts"   — list of monospace fonts, each rendered in its own family
-//               (omarchy-font-{list,current,set})
-//   "unlocks" — grid of themes that ship a preview-unlock.png; activation
-//               opens a floating terminal and runs the plymouth set
-//               (needs sudo). Plus a "Default" entry that resets to the
-//               omarchy-shipped Plymouth.
-//
-// Backspace from an empty query in a sub-view returns to the Style
-// root (handled by `goBack()` and the launcher's backspace handler).
+// Three sub-views: themes (preview-thumb grid), fonts (each rendered
+// in its own family), unlocks (Plymouth styles, sudo via floating
+// terminal). Backed by `omarchy-theme-list` / `omarchy-font-list` etc.
 
 import QtQuick
 import Quickshell
@@ -26,26 +16,21 @@ Provider {
     description: "Themes, fonts, and visuals"
     shortcuts: ["style", "theme"]
 
-    // ── Sub-view state ───────────────────────────────────────────────────
     // "" = root menu. Other values: "themes", "fonts", "unlocks".
     property string view: ""
 
-    // Cached data for sub-views.
     property var _themes: []
     property string _currentTheme: ""
     property var _fonts: []
     property string _currentFont: ""
-    // Unlock styling: list of {dir, display, previewUrl} for every theme
-    // that ships a preview-unlock.png. Populated by unlockPreviewProc.
+    // One entry per theme that ships a preview-unlock.png.
     property var _unlocks: []
-    // Map: display-name → file:// URL of preview image. Populated by
-    // themePreviewProc on startup; mirrors the path-resolution logic from
-    // omarchy's `omarchy_themes.lua` (preview.png > preview.jpg > first
-    // file in backgrounds/), with user-dir overrides winning.
+    // Map of theme display-name → file:// URL of preview image. Mirrors
+    // omarchy_themes.lua's resolution: preview.png > preview.jpg > first
+    // file in backgrounds/. User dir wins over $OMARCHY_PATH.
     property var _themePreviews: ({})
 
-    // Directories that may hold a `<theme>/preview.png`. User overrides
-    // win — same precedence as `omarchy-theme-list`.
+    // User overrides win — same precedence as `omarchy-theme-list`.
     readonly property string _userThemesDir: (Quickshell.env("HOME") || "") + "/.config/omarchy/themes"
     readonly property string _sysThemesDir: Quickshell.env("OMARCHY_PATH") || ""
 
@@ -57,8 +42,6 @@ Provider {
         fontCurrentProc.running = true;
         unlockPreviewProc.running = true;
     }
-
-    // ── Data fetches (run once at startup) ───────────────────────────────
 
     property var _themeBuf: []
     Process {
@@ -174,8 +157,6 @@ Provider {
         }
     }
 
-    // ── Font list / current-font processes ───────────────────────────────
-
     property var _fontBuf: []
     Process {
         id: fontListProc
@@ -212,9 +193,7 @@ Provider {
             prov.refresh()
     }
 
-    // ── Unlock styles (themes that ship preview-unlock.png) ──────────────
-
-    // Emits `<dir-name>\t<preview-unlock-path>` for every theme that has
+    // Emits `<dir-name>\t<preview-unlock-path>` for every theme that ships
     // one. User overrides win, same precedence as the theme picker.
     property var _unlockBuf: []
     Process {
@@ -269,10 +248,8 @@ Provider {
         ).join(" ");
     }
 
-    // ── Search dispatch ──────────────────────────────────────────────────
-
     function search(text) {
-        const q = (text || "").toLowerCase().trim();
+        const q = norm(text);
         if (view === "themes")
             results = _themeResults(q);
         else if (view === "fonts")
@@ -331,22 +308,14 @@ Provider {
         const out = [];
         for (let i = 0; i < _themes.length; i++) {
             const name = _themes[i];
-            const lc = name.toLowerCase();
             const isCurrent = name === _currentTheme;
             let score;
             if (q.length === 0) {
                 score = isCurrent ? 1000 : (500 - i);
             } else {
-                if (lc === q)
-                    score = 1000;
-                else if (lc.startsWith(q))
-                    score = 500;
-                else if (lc.indexOf(q) !== -1)
-                    score = 100;
-                else
-                    continue;
-                if (isCurrent)
-                    score += 1;
+                score = scoreText(q, norm(name));
+                if (score <= 0) continue;
+                if (isCurrent) score *= 1.5;
             }
             out.push({
                 title: name,
@@ -375,22 +344,14 @@ Provider {
         const out = [];
         for (let i = 0; i < _fonts.length; i++) {
             const name = _fonts[i];
-            const lc = name.toLowerCase();
             const isCurrent = name === _currentFont;
             let score;
             if (q.length === 0) {
                 score = isCurrent ? 1000 : (500 - i);
             } else {
-                if (lc === q)
-                    score = 1000;
-                else if (lc.startsWith(q))
-                    score = 500;
-                else if (lc.indexOf(q) !== -1)
-                    score = 100;
-                else
-                    continue;
-                if (isCurrent)
-                    score += 1;
+                score = scoreText(q, norm(name));
+                if (score <= 0) continue;
+                if (isCurrent) score *= 1.5;
             }
             out.push({
                 title: name,
@@ -424,15 +385,12 @@ Provider {
         }];
         for (let i = 0; i < _unlocks.length; i++) {
             const u = _unlocks[i];
-            const lc = u.display.toLowerCase();
             let score;
             if (q.length === 0) {
                 score = 500 - i;
             } else {
-                if (lc === q)                  score = 1000;
-                else if (lc.startsWith(q))     score = 500;
-                else if (lc.indexOf(q) !== -1) score = 100;
-                else continue;
+                score = scoreText(q, norm(u.display));
+                if (score <= 0) continue;
             }
             rows.push({
                 title:    u.display,
@@ -460,8 +418,6 @@ Provider {
         return filtered;
     }
 
-    // ── Activation ───────────────────────────────────────────────────────
-
     function activate(result) {
         const d = result?.data;
         if (!d)
@@ -474,68 +430,37 @@ Provider {
         // so the user can preview the change live and pick another one
         // without having to reopen.
         if (d.kind === "theme" && d.name) {
-            themeSetProc.command = ["omarchy-theme-set", d.name];
-            if (themeSetProc.running)
-                themeSetProc.running = false;
-            themeSetProc.running = true;
+            openExternal(["omarchy-theme-set", d.name]);
             _currentTheme = d.name;
             return true;
         }
         if (d.kind === "font" && d.name) {
-            fontSetProc.command = ["omarchy-font-set", d.name];
-            if (fontSetProc.running)
-                fontSetProc.running = false;
-            fontSetProc.running = true;
+            openExternal(["omarchy-font-set", d.name]);
             _currentFont = d.name;
             return true;
         }
         if (d.kind === "unlock" && d.dir) {
             // sudo prompt — must run in a floating terminal so the user
             // can type the password. Mirrors omarchy_unlocks.lua.
-            unlockSetProc.command = [
+            openExternal([
                 "omarchy-launch-floating-terminal-with-presentation",
                 "omarchy-plymouth-set-by-theme " + d.dir
-            ];
-            if (unlockSetProc.running)
-                unlockSetProc.running = false;
-            unlockSetProc.running = true;
+            ]);
             return;
         }
         if (d.kind === "unlock-default") {
-            unlockSetProc.command = [
+            openExternal([
                 "omarchy-launch-floating-terminal-with-presentation",
                 "omarchy-plymouth-reset"
-            ];
-            if (unlockSetProc.running)
-                unlockSetProc.running = false;
-            unlockSetProc.running = true;
+            ]);
             return;
         }
     }
 
-    Process {
-        id: themeSetProc
-        running: false
-    }
-
-    Process {
-        id: fontSetProc
-        running: false
-    }
-
-    Process {
-        id: unlockSetProc
-        running: false
-    }
-
-    // ── View navigation ──────────────────────────────────────────────────
-
-    // Card dimensions the themes sub-view wants. 0 = launcher default.
-    // Height is left at default; 3×2 cells fit without scrolling.
+    // Themes sub-view: 3 columns × 2 visible rows fit without scrolling.
+    // Height stays at launcher default (0).
     readonly property int _themesViewWidth: 1080
     readonly property int _themesViewHeight: 0
-
-    // Grid params for the themes view. 3 columns × 2 visible rows.
     readonly property int _themesGridColumns: 3
     readonly property int _themesCellHeight: 230
 

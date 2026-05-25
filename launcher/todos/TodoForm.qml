@@ -1,9 +1,6 @@
-// New-todo form. Lives in the right sidebar of TodoView. Name field
-// grabs active focus on load (per user request). Enter on any single-
-// line field saves; Escape on any field cancels.
-//
-// Dates are entered as plain ISO-like strings for now ("YYYY-MM-DD"
-// or "YYYY-MM-DD HH:MM"). A proper picker can replace these later.
+// New-todo form. Right sidebar of TodoView. Name field auto-focuses.
+// Enter saves; Escape cancels. Dates are plain ISO strings for now
+// ("YYYY-MM-DD" or "YYYY-MM-DD HH:MM").
 
 import QtQuick
 
@@ -25,9 +22,8 @@ Item {
 
     readonly property bool _editing: provider && provider.editingId.length > 0
 
-    // Pull provider.editingDraft into the form's local state. Called
-    // whenever the form transitions to formOpen=true; gives both
-    // "new" (empty draft) and "edit" (pre-filled draft) the same path.
+    // Common hydration path — handles both new (empty draft) and edit
+    // (pre-filled draft).
     function _hydrateFromDraft() {
         const d = (root.provider && root.provider.editingDraft) || {};
         fName = d.name || "";
@@ -71,10 +67,8 @@ Item {
         root.provider.closeForm();
     }
 
-    // Hydrate + focus whenever the form is shown OR the user switches
-    // modes while the form is already open (e.g. clicking + while
-    // editing). Listening on editingDraftChanged catches the
-    // already-open case where formOpen doesn't flip.
+    // editingDraftChanged catches mode-switches while the form is
+    // already open (formOpen wouldn't flip).
     function _onShown() {
         if (!root.provider || !root.provider.formOpen)
             return;
@@ -92,10 +86,7 @@ Item {
         }
     }
 
-    // ── Field components ────────────────────────────────────────────────
-    // Borderless input row: nerd-font glyph on the left, TextInput on
-    // the right with an inline placeholder. A 1px bottom rule serves as
-    // the separator and brightens when the input is focused.
+    // Glyph + TextInput + inline placeholder. Bottom rule brightens on focus.
     component FieldRow: Item {
         id: rowItem
         property alias text: input.text
@@ -236,7 +227,6 @@ Item {
         }
     }
 
-    // ── Layout ──────────────────────────────────────────────────────────
     Flickable {
         id: scroller
         anchors.left: parent.left
@@ -258,9 +248,6 @@ Item {
             anchors.topMargin: 14
             spacing: 14
 
-            // Nerd-font glyphs (nf-fa-*): pencil, align-left, calendar,
-            // flag, tag, bell. They'll render as boxes if the font
-            // doesn't have them — swap to whatever set you prefer.
             FieldRow {
                 id: nameRow
                 glyph: ""
@@ -288,9 +275,6 @@ Item {
                 onEscaped: root._cancel()
             }
 
-            // Priority — text options with an accent underscore on the
-            // selected one. No border / fill. "Priority" label on the
-            // left mirrors the placeholder slot in the FieldRows above.
             Item {
                 width: parent.width
                 height: 38
@@ -365,8 +349,6 @@ Item {
         property string label: ""
         readonly property bool _active: root.fPriority === value
         height: parent.height
-        // A few px of horizontal padding so the click target
-        // is a touch wider than the glyph itself.
         implicitWidth: txt.implicitWidth + 6
 
         Text {
@@ -382,8 +364,6 @@ Item {
             Behavior on opacity { NumberAnimation { duration: 140 } }
         }
 
-        // Accent underscore, sized to the text, sitting
-        // just below it. Fades in on selection.
         Rectangle {
             anchors.left: txt.left
             anchors.right: txt.right
@@ -408,7 +388,6 @@ Item {
         }
     }
 
-    // ── Bottom button bar ───────────────────────────────────────────────
     Rectangle {
         id: buttonBar
         anchors.left: parent.left
@@ -426,9 +405,7 @@ Item {
             opacity: 0.5
         }
 
-        // Delete sits on the left, only present in edit mode. Single
-        // click removes the todo — there's no undo dialog yet, but the
-        // JSON file is the source of truth if you ever need to recover.
+        // Edit mode only. No undo dialog — todos.json is the source of truth.
         Rectangle {
             id: deleteBtn
             width: 72
