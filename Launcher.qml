@@ -26,6 +26,7 @@ import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
 import "launcher"
+import "launcher/todos"
 
 PanelWindow {
     id: launcher
@@ -122,9 +123,24 @@ PanelWindow {
         onDetailsEnabledChanged: if (launcher.activeProvIdx === 4) launcher._syncRightLayout()
     }
     CalendarProvider { id: calProv; onResultsChanged: launcher._onProviderResults(5) }
+    TodoProvider {
+        id: todoProv
+        onResultsChanged: launcher._onProviderResults(6)
+        // When the new-todo form closes, the focused TextInput is hidden
+        // and Qt drops focus entirely. Restore it to the launcher's
+        // search field so the user can keep typing / hit Esc to leave.
+        onFormOpenChanged: if (!formOpen) Qt.callLater(() => searchField.forceActiveFocus())
+        // Clicking a todo result in the main-menu aggregated search
+        // asks us to drill into the Todos view so the edit form (which
+        // activate() already opened) becomes visible. Deferred so the
+        // launcher finishes its activate() flow first.
+        onRequestEnter: function (initialQuery) {
+            Qt.callLater(() => launcher.enterProviderById(6, initialQuery));
+        }
+    }
 
     Component.onCompleted: {
-        providers = [nowProv, appsProv, filesProv, styleProv, ghProv, calProv];
+        providers = [nowProv, appsProv, filesProv, styleProv, ghProv, calProv, todoProv];
         // Any provider can ask the launcher to close itself (e.g. after
         // opening a URL externally) by emitting `requestClose`.
         for (let i = 0; i < providers.length; i++) {
@@ -132,6 +148,7 @@ PanelWindow {
             if (p && p.requestClose)
                 p.requestClose.connect(launcher.hide);
         }
+        _validateShortcuts();
         _computeLeft();
     }
 
@@ -182,13 +199,32 @@ PanelWindow {
         _refreshProviderResults();
     }
 
-    // Returns { provIdx, rest } if `text` starts with one of any
-    // provider's `shortcuts` followed by a space; otherwise null.
+    // Returns { provIdx, rest, action? } if `text` matches one of any
+    // provider's plain `shortcuts` (followed by a space) or
+    // `actionShortcuts` (exact match OR followed by a space).
+    // Action matches include `action: "<name>"` which the caller
+    // forwards to `provider.invokeAction(name, rest)` after drill-in.
     function _matchShortcut(text) {
         const lc = (text || "").toLowerCase();
         for (let i = 0; i < providers.length; i++) {
             const p = providers[i];
-            const list = p ? p.shortcuts : null;
+            if (!p) continue;
+
+            // Action shortcuts (exact match allowed since prefixes like
+            // "+t" are intentional triggers, not query starts).
+            const actions = p.actionShortcuts || {};
+            for (const key in actions) {
+                const sc = (key || "").toLowerCase();
+                if (sc.length === 0) continue;
+                if (lc === sc)
+                    return { provIdx: i, rest: "", action: actions[key] };
+                if (lc.startsWith(sc + " "))
+                    return { provIdx: i, rest: text.slice(sc.length + 1), action: actions[key] };
+            }
+
+            // Plain drill-in shortcuts (trailing space required so
+            // typing "t" alone doesn't hijack an actual query).
+            const list = p.shortcuts;
             if (!list) continue;
             for (let j = 0; j < list.length; j++) {
                 const sc = (list[j] || "").toLowerCase();
@@ -198,6 +234,37 @@ PanelWindow {
             }
         }
         return null;
+    }
+
+    // Warn (at startup) about any shortcut key declared by more than
+    // one provider. Plain `shortcuts` and `actionShortcuts` keys share
+    // a single case-insensitive namespace, since both feed
+    // `_matchShortcut` and only the first hit wins. Warnings only —
+    // first match still fires at runtime.
+    function _validateShortcuts() {
+        const seen = ({});
+        for (let i = 0; i < providers.length; i++) {
+            const p = providers[i];
+            if (!p) continue;
+            const provName = p.name || ("provider#" + i);
+            const claim = (key, kind) => {
+                const k = (key || "").toLowerCase().trim();
+                if (!k.length) return;
+                if (!seen[k]) seen[k] = [];
+                seen[k].push(provName + " (" + kind + ")");
+            };
+            const list = p.shortcuts || [];
+            for (let j = 0; j < list.length; j++) claim(list[j], "shortcut");
+            const actions = p.actionShortcuts || {};
+            for (const k in actions) claim(k, "action:" + actions[k]);
+        }
+        for (const key in seen) {
+            const owners = seen[key];
+            if (owners.length > 1)
+                console.warn("Launcher: shortcut '" + key
+                    + "' declared by multiple providers: " + owners.join(", ")
+                    + " — first one wins at runtime.");
+        }
     }
 
     function switchToCategory(provIdx) {
@@ -433,9 +500,18 @@ PanelWindow {
         currentIndex = 0;
         if (mode === "menu") {
             // Typed-shortcut drill-in: "<sc> <rest>" auto-enters that
-            // provider with `<rest>` as the initial query.
+            // provider with `<rest>` as the initial query. Action
+            // shortcuts additionally invoke a provider-defined action
+            // and pass `rest` to it (rather than using it as a filter).
             const sc = _matchShortcut(queryText);
-            if (sc) { enterProviderById(sc.provIdx, sc.rest); return; }
+            if (sc) {
+                enterProviderById(sc.provIdx, sc.action ? "" : sc.rest);
+                if (sc.action) {
+                    const p = providers[sc.provIdx];
+                    if (p && p.invokeAction) p.invokeAction(sc.action, sc.rest);
+                }
+                return;
+            }
             if (queryText.length > 0) {
                 for (let i = 0; i < providers.length; i++)
                     if (providers[i]) providers[i].query = queryText;

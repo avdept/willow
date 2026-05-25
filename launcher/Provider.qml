@@ -45,6 +45,21 @@ QtObject {
     // case-insensitively. Empty list = no shortcuts.
     property list<string> shortcuts: []
 
+    // Action shortcuts: typed prefix → action name. When the
+    // launcher input matches one of these keys (exactly OR followed
+    // by a space), it drills into this provider AND calls
+    // `invokeAction(name, rest)` so the provider can do something
+    // beyond just opening its view. Keys are case-insensitive and
+    // share a namespace with `shortcuts` across all providers — the
+    // launcher warns at startup if any key is declared twice.
+    //
+    // Example (subclass):
+    //   actionShortcuts: ({ "+t": "new" })
+    //   function invokeAction(name, rest) {
+    //       if (name === "new") openForm(...);
+    //   }
+    property var actionShortcuts: ({})
+
     // Optional override of the search placeholder when in this provider.
     // Useful for providers with internal sub-views (e.g. Style → Theme).
     // When empty, the launcher falls back to `name`.
@@ -116,6 +131,11 @@ QtObject {
     // (e.g. theme picks where you want to see the new colors live).
     // Return falsy / nothing for the default behaviour: launcher hides.
     function activate(result) {}
+
+    // Override to handle an action shortcut. `name` is the value of
+    // the matched key in `actionShortcuts`; `rest` is whatever the
+    // user typed after the shortcut (useful as a draft name, etc.).
+    function invokeAction(name, rest) {}
 
     // Optional: providers with internal sub-views override this. Return
     // true when the back was handled internally (the launcher then just
