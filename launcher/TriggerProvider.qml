@@ -16,7 +16,6 @@ Provider {
     description: "Capture screen, video, text, or color"
     shortcuts: ["trigger", "capture"]
 
-    // "" = root capture list, "screenrecord" = audio variants.
     property string view: ""
     property bool _recording: false
 
@@ -103,8 +102,7 @@ Provider {
         }
     ]
 
-    // pgrep matches the recorder process — same detection the omarchy
-    // script uses internally. Refresh on every entry to the sub-view.
+    // pgrep pattern matches the omarchy script's own recorder detection.
     Process {
         id: recordingProbe
         command: ["pgrep", "-f", "^gpu-screen-recorder"]

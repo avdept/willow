@@ -674,7 +674,6 @@ PanelWindow {
                                 const item = launcher.leftModel[i];
                                 if (item && item.chevron) launcher.switchToCategory(item._provIdx);
                             }
-                            onHovered: function (_i) {}
                         }
                     }
 

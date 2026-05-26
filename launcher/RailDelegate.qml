@@ -15,7 +15,6 @@ Item {
     property int iconSize: 28
 
     signal activated(int index)
-    signal hovered(int index)
 
     readonly property bool isSelected: index === currentIndex
 
@@ -31,11 +30,8 @@ Item {
 
     MouseArea {
         anchors.fill: parent
-        hoverEnabled: true
         cursorShape: Qt.ArrowCursor
         onClicked: row.activated(row.index)
-        onContainsMouseChanged: if (containsMouse) row.hovered(row.index)
-        onPositionChanged:      if (!row.isSelected) row.hovered(row.index)
     }
 
     Item {
