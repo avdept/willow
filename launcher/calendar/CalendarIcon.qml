@@ -55,7 +55,7 @@ Item {
                 text: Qt.formatDate(root.now, "ddd").toUpperCase()
                 color: "#ffffff"
                 font.family: root.fontFamily
-                font.pixelSize: Math.max(8, Math.round(banner.height * 0.6))
+                font.pixelSize: Math.max(7, Math.round(Math.min(banner.height * 0.55, parent.width * 0.22)))
                 font.bold: true
                 font.letterSpacing: 0.5
             }
@@ -69,7 +69,7 @@ Item {
             text: root.now.getDate()
             color: root.theme ? root.theme.fg : "#000"
             font.family: root.fontFamily
-            font.pixelSize: Math.max(14, Math.round((parent.height - banner.height) * 0.7))
+            font.pixelSize: Math.max(10, Math.round(Math.min((parent.height - banner.height) * 0.55, parent.width * 0.45)))
             font.bold: true
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter

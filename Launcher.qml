@@ -26,7 +26,7 @@ PanelWindow {
     readonly property int searchRowHeight:   56
     readonly property int footerHeight:      28
     readonly property int dividerHeight:     1
-    readonly property int categoryRailWidth: 64
+    readonly property int categoryRailWidth: 52
     readonly property int collapseAnimDuration: 260
     // Hard caps as a fraction of screen size; provider requests are clamped.
     readonly property real maxWidthRatio:  0.70
@@ -68,6 +68,7 @@ PanelWindow {
         function toggle() { launcher.open ? launcher.hide() : launcher.show() }
         function show()   { launcher.show() }
         function hide()   { launcher.hide() }
+        function showProvider(name: string) { launcher.showProvider(name) }
     }
 
     // ── Providers ────────────────────────────────────────────────────────
@@ -101,9 +102,14 @@ PanelWindow {
         // drops focus entirely. Restore it to the search field.
         onFormOpenChanged: if (!formOpen) Qt.callLater(() => searchField.forceActiveFocus())
     }
+    TriggerProvider {
+        id: triggerProv
+        onResultsChanged: launcher._onProviderResults(7)
+        onViewChanged: if (launcher.activeProvIdx === 7) launcher._onProviderViewChanged()
+    }
 
     Component.onCompleted: {
-        providers = [nowProv, appsProv, filesProv, styleProv, ghProv, calProv, todoProv];
+        providers = [nowProv, appsProv, filesProv, styleProv, ghProv, calProv, todoProv, triggerProv];
         for (let i = 0; i < providers.length; i++) {
             const p = providers[i];
             if (!p) continue;
@@ -137,6 +143,18 @@ PanelWindow {
     function hide() {
         open = false;
         _resetState();
+    }
+
+    function showProvider(name) {
+        const idx = providers.findIndex(p => p && p.name && p.name.toLowerCase() === (name || "").toLowerCase());
+        if (idx < 0) { show(); return; }
+        _resetState();
+        _computeLeft();
+        open = true;
+        Qt.callLater(() => {
+            enterProviderById(idx, "");
+            searchField.forceActiveFocus();
+        });
     }
 
     function _resetState() {
@@ -624,34 +642,43 @@ PanelWindow {
 
                     Behavior on width { NumberAnimation { duration: launcher.collapseAnimDuration; easing.type: Easing.OutCubic } }
 
-                    delegate: ResultDelegate {
-                        width: ListView.view.width - 12
-                        x: 6
-                        // In menu mode the keyboard selection lives here; in
-                        // provider mode the row matching the active category
-                        // stays highlighted instead.
-                        currentIndex: launcher.mode === "menu"
-                            ? launcher.currentIndex
-                            : launcher.activeProvIdx
-                        theme: launcher.theme
-                        fontFamily: launcher.fontFamily
-                        launcherOpen: launcher.open
-                        onActivated: function (i) {
-                            if (launcher.mode === "menu") {
+                    Component {
+                        id: leftFullDelegate
+                        ResultDelegate {
+                            width: ListView.view.width - 12
+                            x: 6
+                            currentIndex: launcher.currentIndex
+                            theme: launcher.theme
+                            fontFamily: launcher.fontFamily
+                            launcherOpen: launcher.open
+                            onActivated: function (i) {
                                 launcher.currentIndex = i;
                                 launcher.activateCurrent();
-                            } else {
-                                // In provider mode, clicking a category icon
-                                // switches to that provider.
+                            }
+                            onHovered: function (i) {
+                                if (launcher.currentIndex !== i)
+                                    launcher.currentIndex = i;
+                            }
+                        }
+                    }
+
+                    Component {
+                        id: leftRailDelegate
+                        RailDelegate {
+                            width: ListView.view.width
+                            currentIndex: launcher.activeProvIdx
+                            theme: launcher.theme
+                            fontFamily: launcher.fontFamily
+                            launcherOpen: launcher.open
+                            onActivated: function (i) {
                                 const item = launcher.leftModel[i];
                                 if (item && item.chevron) launcher.switchToCategory(item._provIdx);
                             }
-                        }
-                        onHovered: function (i) {
-                            if (launcher.mode === "menu" && launcher.currentIndex !== i)
-                                launcher.currentIndex = i;
+                            onHovered: function (_i) {}
                         }
                     }
+
+                    delegate: launcher.mode === "provider" ? leftRailDelegate : leftFullDelegate
 
                     // Empty state — only relevant in menu mode.
                     Text {
