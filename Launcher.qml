@@ -22,7 +22,7 @@ PanelWindow {
     required property string fontFamily
 
     readonly property int defaultCardWidth:  640
-    readonly property int defaultCardHeight: 640
+    readonly property int defaultCardHeight: 700
     readonly property int searchRowHeight:   56
     readonly property int footerHeight:      28
     readonly property int dividerHeight:     1
@@ -107,9 +107,14 @@ PanelWindow {
         onResultsChanged: launcher._onProviderResults(7)
         onViewChanged: if (launcher.activeProvIdx === 7) launcher._onProviderViewChanged()
     }
+    InstallProvider {
+        id: installProv
+        onResultsChanged: launcher._onProviderResults(8)
+        onViewChanged: if (launcher.activeProvIdx === 8) launcher._onProviderViewChanged()
+    }
 
     Component.onCompleted: {
-        providers = [nowProv, appsProv, filesProv, styleProv, ghProv, calProv, todoProv, triggerProv];
+        providers = [nowProv, appsProv, filesProv, styleProv, ghProv, calProv, todoProv, triggerProv, installProv];
         for (let i = 0; i < providers.length; i++) {
             const p = providers[i];
             if (!p) continue;
