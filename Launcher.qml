@@ -22,7 +22,7 @@ PanelWindow {
     required property string fontFamily
 
     readonly property int defaultCardWidth:  640
-    readonly property int defaultCardHeight: 700
+    readonly property int defaultCardHeight: 777
     readonly property int searchRowHeight:   56
     readonly property int footerHeight:      28
     readonly property int dividerHeight:     1
@@ -112,9 +112,22 @@ PanelWindow {
         onResultsChanged: launcher._onProviderResults(8)
         onViewChanged: if (launcher.activeProvIdx === 8) launcher._onProviderViewChanged()
     }
+    SetupProvider {
+        id: setupProv
+        onResultsChanged: launcher._onProviderResults(9)
+        onViewChanged: if (launcher.activeProvIdx === 9) launcher._onProviderViewChanged()
+    }
+    SystemProvider {
+        id: systemProv
+        onResultsChanged: launcher._onProviderResults(10)
+    }
+    CalcProvider {
+        id: calcProv
+        onResultsChanged: launcher._onProviderResults(11)
+    }
 
     Component.onCompleted: {
-        providers = [nowProv, appsProv, filesProv, styleProv, ghProv, calProv, todoProv, triggerProv, installProv];
+        providers = [nowProv, appsProv, filesProv, styleProv, ghProv, calProv, todoProv, triggerProv, installProv, setupProv, systemProv, calcProv];
         for (let i = 0; i < providers.length; i++) {
             const p = providers[i];
             if (!p) continue;
@@ -368,15 +381,21 @@ PanelWindow {
             iconUrl:     r.iconUrl,
             iconText:    r.iconText || p.iconText,
             iconComponent: r.iconComponent || p.iconComponent,
-            // Chevron rows are sub-sections (e.g. Style → Theme) — no tag pill.
-            providerTag: isChev ? "" : (r.providerTag ?? p.tag),
+            // Tag pills only earn their keep in menu-mode aggregated
+            // search where rows come from different providers. Inside a
+            // provider, every row would carry the same tag — redundant
+            // with the active rail icon. Chevron rows (sub-sections)
+            // never get one.
+            providerTag: isChev || launcher.mode === "provider"
+                ? ""
+                : (r.providerTag ?? p.tag),
             chevron:     isChev,
             titleFont:   r.titleFont || "",
             tagColor:    r.tagColor || "",
             data:        r.data,
             _provIdx:    provIdx,
             _result:     r,
-            _score:      r.score ?? 0
+            _score:      (r.score ?? 0) * (p.scoreMultiplier ?? 1)
         };
     }
 
@@ -400,14 +419,17 @@ PanelWindow {
         if (mode === "menu" && queryText.trim().length > 0) {
             for (let i = 0; i < providers.length; i++) {
                 const p = providers[i];
-                if (!p) continue;
+                if (!p || p.aggregateInSearch === false) continue;
                 const rs = p.results || [];
                 for (let j = 0; j < rs.length; j++) out.push(_resultRow(i, p, rs[j]));
             }
             out.sort((a, b) => b._score - a._score);
         } else {
-            for (let i = 0; i < providers.length; i++)
-                if (providers[i]) out.push(_categoryRow(i, providers[i]));
+            for (let i = 0; i < providers.length; i++) {
+                const p = providers[i];
+                if (!p || p.showAsCategory === false) continue;
+                out.push(_categoryRow(i, p));
+            }
         }
         leftModel = out;
         _clampCurrent();
@@ -429,7 +451,11 @@ PanelWindow {
 
     function _onProviderResults(idx) {
         if (mode === "provider" && idx === activeProvIdx) _refreshProviderResults();
-        else if (mode === "menu" && queryText.length > 0) _computeLeft();
+        else if (mode === "menu" && queryText.length > 0) {
+            const p = providers[idx];
+            if (p && p.aggregateInSearch === false) return;
+            _computeLeft();
+        }
     }
 
     function _onProviderViewChanged() {

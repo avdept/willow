@@ -24,6 +24,11 @@ Provider {
     cellHeight: 120
     requestedWidth: 1120
 
+    // Dashboard tiles are not search results — re-emitting them on every
+    // CPU tick during menu-mode search churns the merged list and resets
+    // scroll. The category icon (rail) still drills into the dashboard.
+    aggregateInSearch: false
+
     // Live readings. _publish() rebuilds `results` whenever any of these change.
     property string _weatherIcon: ""
     property string _weatherTemp: ""
@@ -205,11 +210,6 @@ Provider {
             id: "lock"
         });
         tiles.push({
-            glyph: "󰐥",
-            title: "Power",
-            id: "power"
-        });
-        tiles.push({
             glyph: "󰂯",
             title: "Bluetooth",
             id: "bluetooth"
@@ -226,13 +226,10 @@ Provider {
             const t = tiles[i];
             out[i] = {
                 title: t.title,
-                iconUrl: ""          // no preview image → cell falls back to iconText
-                ,
+                iconUrl: "",
                 iconText: t.glyph,
                 score: tiles.length - i,
-                data: {
-                    id: t.id
-                }
+                data: { id: t.id }
             };
         }
         results = out;
@@ -259,7 +256,6 @@ Provider {
             openExternal(["omarchy-launch-audio"]);
             return;
         case "battery":
-        case "power":
             openExternal(["omarchy-menu", "power"]);
             return;
         case "lock":

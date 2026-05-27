@@ -13,6 +13,7 @@ Provider {
     tag: "app"
     iconText: "󰘳"
     description: "Search and launch applications"
+    scoreMultiplier: 1.5
 
     // Walker uses 256 as its cap; we follow.
     property int maxResults: 256

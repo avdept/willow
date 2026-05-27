@@ -70,6 +70,15 @@ on the ladder staying stable.
 All inputs MUST be pre-lowercased+trimmed via `norm()`; the scorer
 skips that work for hot loops.
 
+Per-provider weight for the merged list comes from `scoreMultiplier`
+(default `1.0`). Bump on providers the user expects to dominate
+(`AppsProvider` ships at `1.5`); drop on rarely-targeted ones. Only
+applied during menu-mode aggregation — within-provider ordering is
+decided before the multiplier touches the row. Multipliers preserve
+band shape: same-band ties go to the higher-weight provider, but a
+lower-band match in a heavily-weighted provider still loses to a
+higher-band match elsewhere unless you crank the weight well past 2×.
+
 ---
 
 ## Shipped
@@ -100,6 +109,27 @@ skips that work for hot loops.
   blue). Owner avatars via `https://github.com/<login>.png`. Opts into
   the side-by-side details pane (PR/issue body, repo stats, …) with a
   per-URL detail cache. Activation opens the item URL via `xdg-open`.
+- **CalcProvider** — inline math evaluator. Triggers on a leading `=`
+  in the query (`=5+5` → `10`); rejects anything outside a strict
+  allowlist of digits + math operators so eval is fast enough to run
+  on every keystroke without spawning a subprocess. Score `10000`
+  pins the result to the top of the aggregated list. Activation
+  copies the result via `wl-copy`. Hidden from the sidebar category
+  list (`showAsCategory: false`) since it's query-driven.
+- **SystemProvider** — mirrors `show_system_menu` from `omarchy-menu`.
+  Flat list of seven session actions (Screensaver, Lock, Suspend,
+  Hibernate, Logout, Restart, Shutdown). Suspend hidden when
+  `omarchy-toggle-enabled suspend-off` is set; Hibernate hidden when
+  `omarchy-hibernation-available` exits non-zero. Both states are
+  re-probed each time the launcher opens.
+- **SetupProvider** — mirrors the "Setup" section of `omarchy-menu`.
+  Static leaves (Audio/Wifi/Bluetooth, Monitors, Keybindings, Input, DNS,
+  individual config files) drill or spawn directly; dynamic sub-views
+  (Power Profile, System Sleep, Defaults) re-probe state on entry so the
+  "current" indicator stays honest after toggling. Power profile + default
+  browser/terminal/editor return `true` from `activate()` to keep the
+  launcher open for A/B selection. Edit-then-restart configs are wrapped
+  in a single `sh -c "omarchy-launch-editor X && omarchy-restart-Y"`.
 - **CalendarProvider** — owns calendar state (current month/year,
   focused day) and delegates rendering to per-view components under
   `launcher/calendar/`. Today: `MonthComponent` (Apple-style 6×7 grid
@@ -121,17 +151,6 @@ skips that work for hot loops.
 
 Filling in the specs as you decide on the behavior you want; the
 skeleton/contract is the same for each.
-
-### CalcProvider — inline calculator
-
-- **Trigger**: detect when the query parses as math (regex on digits +
-  operators, or just try-parse). Probably always-on with a high score so
-  results jump to the top.
-- **Backend**: `qalc -t` if installed (preferred — handles units), else
-  `python3 -c "print(<expr>)"` with a strict allowlist of characters
-  (`0-9 + - * / . ( ) ^ %`).
-- **Activate**: copy the result to the clipboard via `wl-copy`.
-- **Score**: ~10000 (always tops the list when active).
 
 ### SystemProvider — power / session actions
 

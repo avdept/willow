@@ -57,6 +57,24 @@ QtObject {
     property string query: ""
     property var results: []
 
+    // Cross-provider ranking weight. Only applied in menu-mode aggregated
+    // search; within-provider ordering is decided by `score` before this
+    // multiplier ever touches the row. Bump for providers the user
+    // expects to dominate (apps), drop for rarely-targeted ones (setup).
+    property real scoreMultiplier: 1.0
+
+    // Whether this provider contributes rows to menu-mode aggregated
+    // search. Dashboard providers (NowProvider) emit results on a timer
+    // even when their content doesn't reflect the query — re-aggregating
+    // on each tick churns the merged list and resets the user's scroll.
+    // Set false to exclude entirely from the aggregated view.
+    property bool aggregateInSearch: true
+
+    // Whether this provider appears as a browseable category in the
+    // root menu (empty query). Query-driven providers like Calc
+    // (`=5+5`) have nothing to show when entered without input.
+    property bool showAsCategory: true
+
     // Bound by Launcher.qml. Providers should gate background
     // timers/process spawns on this for laptop power.
     property bool launcherOpen: false
