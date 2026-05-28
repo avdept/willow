@@ -59,9 +59,8 @@ Item {
                 width: ListView.view.width - 12
                 x: 6
                 height: 44
-                radius: 6
                 color: _active && root.theme
-                    ? Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.16)
+                    ? Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.18)
                     : (convMa.containsMouse && root.theme
                         ? Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.06)
                         : "transparent")
@@ -167,89 +166,10 @@ Item {
             anchors.top: parent.top
             height: 36
 
-            Rectangle {
-                id: backendChip
-                anchors.left: parent.left
-                anchors.leftMargin: 14
-                anchors.verticalCenter: parent.verticalCenter
-                radius: 4
-                height: 20
-                width: backendText.implicitWidth + 14
-                color: backendMa.containsMouse && root.theme
-                    ? Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.10)
-                    : "transparent"
-                border.color: root.theme ? root.theme.accent : "#1e66f5"
-                border.width: 1
-
-                Text {
-                    id: backendText
-                    anchors.centerIn: parent
-                    text: root.provider && root.provider.currentBackend
-                        ? root.provider.currentBackend.name + "  ▾"
-                        : ""
-                    color: root.theme ? root.theme.accent : "#1e66f5"
-                    font.family: root.fontFamily
-                    font.pixelSize: 11
-                    font.bold: true
-                }
-
-                MouseArea {
-                    id: backendMa
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        if (!root.provider) return;
-                        root.provider.openDropdown =
-                            root.provider.openDropdown === "backend" ? "" : "backend";
-                    }
-                }
-            }
-
-            Rectangle {
-                id: modelChip
-                anchors.left: backendChip.right
-                anchors.leftMargin: 6
-                anchors.verticalCenter: parent.verticalCenter
-                radius: 4
-                height: 20
-                width: modelText.implicitWidth + 14
-                color: modelMa.containsMouse && root.theme
-                    ? Qt.rgba(root.theme.fg.r, root.theme.fg.g, root.theme.fg.b, 0.08)
-                    : "transparent"
-                border.color: root.theme ? root.theme.border : "#444"
-                border.width: 1
-
-                Text {
-                    id: modelText
-                    anchors.centerIn: parent
-                    text: {
-                        if (!root.provider) return "";
-                        if (root.provider.currentModel.length === 0) return "no model  ▾";
-                        return root.provider.currentModel + "  ▾";
-                    }
-                    color: root.theme ? root.theme.subFg : "#888"
-                    font.family: root.fontFamily
-                    font.pixelSize: 11
-                }
-
-                MouseArea {
-                    id: modelMa
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        if (!root.provider) return;
-                        root.provider.openDropdown =
-                            root.provider.openDropdown === "model" ? "" : "model";
-                    }
-                }
-            }
-
             Text {
                 id: statusText
-                anchors.left: modelChip.right
-                anchors.leftMargin: 10
+                anchors.left: parent.left
+                anchors.leftMargin: 14
                 anchors.verticalCenter: parent.verticalCenter
                 visible: root.provider && (root.provider.sending || root.provider.lastError.length > 0)
                 text: {
@@ -396,43 +316,5 @@ Item {
             }
         }
 
-        Dropdown {
-            id: backendDropdown
-            visible: root.provider && root.provider.openDropdown === "backend"
-            x: chatHeader.x + backendChip.x
-            y: chatHeader.y + chatHeader.height + 4
-            z: 100
-            width: 180
-            theme: root.theme
-            fontFamily: root.fontFamily
-            items: root.provider ? root.provider.backends : []
-            labelFor: (item, index) => item.name
-            isSelected: (item, index) =>
-                root.provider && root.provider.currentBackendIdx === index
-            onSelected: (index, item) => {
-                if (!root.provider) return;
-                root.provider.setBackend(index);
-                root.provider.openDropdown = "";
-            }
-        }
-
-        Dropdown {
-            id: modelDropdown
-            visible: root.provider && root.provider.openDropdown === "model"
-            x: chatHeader.x + modelChip.x
-            y: chatHeader.y + chatHeader.height + 4
-            z: 100
-            width: Math.max(220, modelChip.width)
-            theme: root.theme
-            fontFamily: root.fontFamily
-            items: root.provider ? root.provider.availableModels : []
-            isSelected: (item, index) =>
-                root.provider && root.provider.currentModel === item
-            onSelected: (index, item) => {
-                if (!root.provider) return;
-                root.provider.currentModel = item;
-                root.provider.openDropdown = "";
-            }
-        }
     }
 }

@@ -953,17 +953,35 @@ PanelWindow {
                     HintText { text: launcher.mode === "menu" ? "esc close" : "esc back"  }
                 }
 
-                HintText {
+                Loader {
+                    id: footerRightLoader
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.right: parent.right
                     anchors.rightMargin: 14
-                    text: {
-                        const n = launcher.activeModel.length;
-                        const inMenuEmpty = launcher.mode === "menu" && launcher.queryText.length === 0;
-                        const noun = inMenuEmpty
-                            ? (n === 1 ? "category" : "categories")
-                            : (n === 1 ? "result"   : "results");
-                        return n + " " + noun;
+                    readonly property var _activeProv: launcher.mode === "provider" && launcher.activeProvIdx >= 0
+                        ? launcher.providers[launcher.activeProvIdx]
+                        : null
+                    sourceComponent: _activeProv && _activeProv.footerRightComponent
+                        ? _activeProv.footerRightComponent
+                        : defaultFooterRight
+                    onLoaded: if (item && _activeProv && _activeProv.footerRightComponent) {
+                        if (item.theme !== undefined)      item.theme = launcher.theme;
+                        if (item.fontFamily !== undefined) item.fontFamily = launcher.fontFamily;
+                        if (item.provider !== undefined)   item.provider = _activeProv;
+                    }
+                }
+
+                Component {
+                    id: defaultFooterRight
+                    HintText {
+                        text: {
+                            const n = launcher.activeModel.length;
+                            const inMenuEmpty = launcher.mode === "menu" && launcher.queryText.length === 0;
+                            const noun = inMenuEmpty
+                                ? (n === 1 ? "category" : "categories")
+                                : (n === 1 ? "result"   : "results");
+                            return n + " " + noun;
+                        }
                     }
                 }
             }

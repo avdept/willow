@@ -42,6 +42,11 @@ QtObject {
     // while this provider is active. See SearchAction.qml.
     property list<SearchAction> searchActions: []
 
+    // Replaces the default "N results" hint on the right side of the
+    // footer while this provider is active. Use Launcher.HintText for
+    // matching typography. Null = keep the default count.
+    property Component footerRightComponent: null
+
     // Opt-in side-by-side details pane. Provider writes `detail` (shape
     // in DetailsPane.qml) on `selectedRow` change.
     property bool detailsEnabled: false

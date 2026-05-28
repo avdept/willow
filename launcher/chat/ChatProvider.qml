@@ -7,6 +7,7 @@ import QtQuick
 import QtQuick.LocalStorage
 import Quickshell.Io
 import ".."
+import "../../shared"
 
 Provider {
     id: prov
@@ -32,10 +33,15 @@ Provider {
 
     aggregateInSearch: false
 
-    property var backends: [
-        ({ id: "ollama",   name: "Ollama",    baseUrl: "http://localhost:11434/v1" }),
-        ({ id: "lmstudio", name: "LM Studio", baseUrl: "http://localhost:1234/v1"  })
-    ]
+    property var backends: [({
+                id: "ollama",
+                name: "Ollama",
+                baseUrl: "http://localhost:11434/v1"
+            }), ({
+                id: "lmstudio",
+                name: "LM Studio",
+                baseUrl: "http://localhost:1234/v1"
+            })]
     property int currentBackendIdx: 0
     readonly property var currentBackend: backends[currentBackendIdx] || backends[0]
 
@@ -69,19 +75,8 @@ Provider {
     function _openDb() {
         _db = LocalStorage.openDatabaseSync("arch-rising", "1.0", "Launcher data", 5000000);
         _db.transaction(tx => {
-            tx.executeSql('CREATE TABLE IF NOT EXISTS conversations ('
-                + 'id TEXT PRIMARY KEY,'
-                + 'title TEXT,'
-                + 'model TEXT,'
-                + 'backend TEXT,'
-                + 'created_at INTEGER,'
-                + 'updated_at INTEGER)');
-            tx.executeSql('CREATE TABLE IF NOT EXISTS messages ('
-                + 'id INTEGER PRIMARY KEY AUTOINCREMENT,'
-                + 'conversation_id TEXT NOT NULL,'
-                + 'role TEXT NOT NULL,'
-                + 'content TEXT NOT NULL,'
-                + 'created_at INTEGER NOT NULL)');
+            tx.executeSql('CREATE TABLE IF NOT EXISTS conversations (' + 'id TEXT PRIMARY KEY,' + 'title TEXT,' + 'model TEXT,' + 'backend TEXT,' + 'created_at INTEGER,' + 'updated_at INTEGER)');
+            tx.executeSql('CREATE TABLE IF NOT EXISTS messages (' + 'id INTEGER PRIMARY KEY AUTOINCREMENT,' + 'conversation_id TEXT NOT NULL,' + 'role TEXT NOT NULL,' + 'content TEXT NOT NULL,' + 'created_at INTEGER NOT NULL)');
             tx.executeSql('CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at)');
         });
         // Idempotent: adds `backend` to conversations tables created
@@ -99,7 +94,14 @@ Provider {
             const rs = tx.executeSql('SELECT id, title, model, backend, created_at, updated_at FROM conversations ORDER BY updated_at DESC');
             for (let i = 0; i < rs.rows.length; i++) {
                 const r = rs.rows.item(i);
-                out.push({ id: r.id, title: r.title, model: r.model, backend: r.backend, created_at: r.created_at, updated_at: r.updated_at });
+                out.push({
+                    id: r.id,
+                    title: r.title,
+                    model: r.model,
+                    backend: r.backend,
+                    created_at: r.created_at,
+                    updated_at: r.updated_at
+                });
             }
         });
         conversations = out;
@@ -111,45 +113,57 @@ Provider {
             const rs = tx.executeSql('SELECT role, content, created_at FROM messages WHERE conversation_id = ? ORDER BY created_at ASC, id ASC', [convId]);
             for (let i = 0; i < rs.rows.length; i++) {
                 const r = rs.rows.item(i);
-                out.push({ role: r.role, content: r.content, created_at: r.created_at });
+                out.push({
+                    role: r.role,
+                    content: r.content,
+                    created_at: r.created_at
+                });
             }
         });
         currentMessages = out;
     }
 
     function selectConversation(id) {
-        if (sending) return;
+        if (sending)
+            return;
         currentConversationId = id;
         _loadMessages(id);
         lastError = "";
     }
 
     function newConversation() {
-        if (sending) return;
+        if (sending)
+            return;
         currentConversationId = "";
         currentMessages = [];
         lastError = "";
     }
 
     function deleteConversation(id) {
-        if (sending) return;
+        if (sending)
+            return;
         _db.transaction(tx => {
             tx.executeSql('DELETE FROM messages WHERE conversation_id = ?', [id]);
             tx.executeSql('DELETE FROM conversations WHERE id = ?', [id]);
         });
-        if (currentConversationId === id) newConversation();
+        if (currentConversationId === id)
+            newConversation();
         _loadConversations();
     }
 
     function stopStream() {
-        if (!sending) return;
+        if (!sending)
+            return;
         streamProc.running = false;
     }
 
     function setBackend(idx) {
-        if (sending) return;
-        if (idx < 0 || idx >= backends.length) return;
-        if (idx === currentBackendIdx) return;
+        if (sending)
+            return;
+        if (idx < 0 || idx >= backends.length)
+            return;
+        if (idx === currentBackendIdx)
+            return;
         currentBackendIdx = idx;
         availableModels = [];
         currentModel = "";
@@ -158,13 +172,13 @@ Provider {
     }
 
     function _ensureConversation(firstMessage) {
-        if (currentConversationId.length > 0) return currentConversationId;
+        if (currentConversationId.length > 0)
+            return currentConversationId;
         const id = _newId();
         const now = Date.now();
         const title = (firstMessage || "New chat").slice(0, 60);
         _db.transaction(tx => {
-            tx.executeSql('INSERT INTO conversations(id, title, model, backend, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-                [id, title, currentModel, currentBackend.id, now, now]);
+            tx.executeSql('INSERT INTO conversations(id, title, model, backend, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)', [id, title, currentModel, currentBackend.id, now, now]);
         });
         currentConversationId = id;
         return id;
@@ -173,11 +187,16 @@ Provider {
     function _appendMessage(convId, role, content) {
         const now = Date.now();
         _db.transaction(tx => {
-            tx.executeSql('INSERT INTO messages(conversation_id, role, content, created_at) VALUES (?, ?, ?, ?)',
-                [convId, role, content, now]);
+            tx.executeSql('INSERT INTO messages(conversation_id, role, content, created_at) VALUES (?, ?, ?, ?)', [convId, role, content, now]);
             tx.executeSql('UPDATE conversations SET updated_at = ? WHERE id = ?', [now, convId]);
         });
-        currentMessages = currentMessages.concat([{ role: role, content: content, created_at: now }]);
+        currentMessages = currentMessages.concat([
+            {
+                role: role,
+                content: content,
+                created_at: now
+            }
+        ]);
     }
 
     Process {
@@ -193,17 +212,20 @@ Provider {
         stderr: SplitParser {
             splitMarker: "\n"
             onRead: line => {
-                if (!line || !line.length) return;
+                if (!line || !line.length)
+                    return;
                 console.log("ChatProvider: curl stderr:", line);
                 prov.lastError = line;
             }
         }
-        onRunningChanged: if (!running) prov._onStreamDone()
+        onRunningChanged: if (!running)
+            prov._onStreamDone()
     }
 
     function sendMessage(text) {
         const t = (text || "").trim();
-        if (!t.length || sending) return;
+        if (!t.length || sending)
+            return;
         if (!currentModel.length) {
             lastError = "No model loaded in " + currentBackend.name;
             return;
@@ -217,36 +239,40 @@ Provider {
 
     function _startStream(convId) {
         const be = currentBackend;
-        const msgs = currentMessages.map(m => ({ role: m.role, content: m.content }));
-        const body = JSON.stringify({ model: currentModel, messages: msgs, stream: true });
+        const msgs = currentMessages.map(m => ({
+                    role: m.role,
+                    content: m.content
+                }));
+        const body = JSON.stringify({
+            model: currentModel,
+            messages: msgs,
+            stream: true
+        });
         _streamConvId = convId;
         _streamBuffer = "";
         _rawStdout = "";
         _lastDeltaKind = "";
         pendingAssistant = "";
         sending = true;
-        streamProc.command = [
-            "curl", "-N", "-sS",
-            "-X", "POST",
-            "-H", "content-type: application/json",
-            "-H", "accept: text/event-stream",
-            "-d", body,
-            be.baseUrl + "/chat/completions"
-        ];
+        streamProc.command = ["curl", "-N", "-sS", "-X", "POST", "-H", "content-type: application/json", "-H", "accept: text/event-stream", "-d", body, be.baseUrl + "/chat/completions"];
         streamProc.running = true;
     }
 
     function _onStreamLine(line) {
-        if (!line) return;
+        if (!line)
+            return;
         // Quickshell's SplitParser preserves the splitMarker at the
         // start of subsequent emissions, so SSE events past the first
         // arrive as "\ndata: {…}". Strip surrounding whitespace before
         // the prefix check.
         line = line.trim();
-        if (!line.length) return;
-        if (line.indexOf("data:") !== 0) return;
+        if (!line.length)
+            return;
+        if (line.indexOf("data:") !== 0)
+            return;
         const payload = line.slice(5).trim();
-        if (!payload.length || payload === "[DONE]") return;
+        if (!payload.length || payload === "[DONE]")
+            return;
         try {
             const d = JSON.parse(payload);
             if (d.error) {
@@ -256,14 +282,16 @@ Provider {
             const ch = d.choices && d.choices[0];
             const delta = ch && (ch.delta || ch.message);
             const reasoning = delta && typeof delta.reasoning_content === "string" ? delta.reasoning_content : "";
-            const content   = delta && typeof delta.content === "string" ? delta.content : "";
+            const content = delta && typeof delta.content === "string" ? delta.content : "";
             if (reasoning.length) {
-                if (_lastDeltaKind === "content") _streamBuffer += "\n\n";
+                if (_lastDeltaKind === "content")
+                    _streamBuffer += "\n\n";
                 _streamBuffer += reasoning;
                 _lastDeltaKind = "reasoning";
             }
             if (content.length) {
-                if (_lastDeltaKind === "reasoning") _streamBuffer += "\n\n";
+                if (_lastDeltaKind === "reasoning")
+                    _streamBuffer += "\n\n";
                 _streamBuffer += content;
                 _lastDeltaKind = "content";
             }
@@ -275,7 +303,8 @@ Provider {
     }
 
     function _onStreamDone() {
-        if (!sending) return;
+        if (!sending)
+            return;
         sending = false;
         let buf = _streamBuffer;
         const convId = _streamConvId;
@@ -293,11 +322,11 @@ Provider {
                     const ch = d.choices && d.choices[0];
                     const msg = ch && (ch.message || ch.delta);
                     const content = msg && typeof msg.content === "string" ? msg.content : "";
-                    if (content.length) buf = content;
+                    if (content.length)
+                        buf = content;
                 }
             } catch (e) {
-                console.warn("ChatProvider._onStreamDone: raw stdout was not JSON:",
-                    raw.slice(0, 500));
+                console.warn("ChatProvider._onStreamDone: raw stdout was not JSON:", raw.slice(0, 500));
             }
         }
 
@@ -314,20 +343,20 @@ Provider {
 
     function _fetchModels() {
         const be = currentBackend;
-        if (!be) return;
+        if (!be)
+            return;
         const xhr = new XMLHttpRequest();
         xhr.open("GET", be.baseUrl + "/models");
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState !== 4) return;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4)
+                return;
             if (xhr.status >= 200 && xhr.status < 300) {
                 try {
                     const data = JSON.parse(xhr.responseText);
                     const ms = (data.data || []).map(m => m.id);
                     availableModels = ms;
                     currentModel = ms.length > 0 ? ms[0] : "";
-                    lastError = ms.length === 0
-                        ? "No models loaded in " + be.name
-                        : "";
+                    lastError = ms.length === 0 ? "No models loaded in " + be.name : "";
                 } catch (e) {
                     console.warn("ChatProvider: failed to parse /v1/models:", e);
                     lastError = "Bad response from " + be.name;
@@ -380,5 +409,73 @@ Provider {
 
     customComponent: Component {
         ChatView {}
+    }
+
+    footerRightComponent: Component {
+        Item {
+            id: footerRoot
+
+            property var theme: null
+            property string fontFamily: ""
+            property var provider: null
+
+            implicitWidth: chips.implicitWidth
+            implicitHeight: chips.implicitHeight
+
+            Row {
+                id: chips
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: 6
+
+                Dropdown {
+                    id: backendDD
+                    theme: footerRoot.theme
+                    fontFamily: footerRoot.fontFamily
+                    emphasized: false
+                    openUpward: true
+                    items: footerRoot.provider ? footerRoot.provider.backends : []
+                    labelFor: (item, index) => item.name
+                    isSelected: (item, index) => footerRoot.provider && footerRoot.provider.currentBackendIdx === index
+                    currentLabel: footerRoot.provider && footerRoot.provider.currentBackend ? footerRoot.provider.currentBackend.name : ""
+                    open: footerRoot.provider && footerRoot.provider.openDropdown === "backend"
+                    onTriggerClicked: {
+                        if (!footerRoot.provider)
+                            return;
+                        footerRoot.provider.openDropdown = footerRoot.provider.openDropdown === "backend" ? "" : "backend";
+                    }
+                    onSelected: (index, item) => {
+                        if (!footerRoot.provider)
+                            return;
+                        footerRoot.provider.setBackend(index);
+                        footerRoot.provider.openDropdown = "";
+                    }
+                }
+
+                Dropdown {
+                    id: modelDD
+                    theme: footerRoot.theme
+                    fontFamily: footerRoot.fontFamily
+                    openUpward: true
+                    popupWidth: Math.max(220, modelDD.width)
+                    items: footerRoot.provider ? footerRoot.provider.availableModels : []
+                    isSelected: (item, index) => footerRoot.provider && footerRoot.provider.currentModel === item
+                    currentLabel: footerRoot.provider && footerRoot.provider.currentModel.length > 0 ? footerRoot.provider.currentModel : ""
+                    placeholder: "no model"
+                    open: footerRoot.provider && footerRoot.provider.openDropdown === "model"
+                    onTriggerClicked: {
+                        if (!footerRoot.provider)
+                            return;
+                        footerRoot.provider.openDropdown = footerRoot.provider.openDropdown === "model" ? "" : "model";
+                    }
+                    onSelected: (index, item) => {
+                        if (!footerRoot.provider)
+                            return;
+                        footerRoot.provider.currentModel = item;
+                        footerRoot.provider.openDropdown = "";
+                    }
+                }
+            }
+        }
     }
 }
