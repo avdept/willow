@@ -371,7 +371,10 @@ Item {
             anchors.topMargin: 3
             height: 2
             radius: 1
-            color: root.theme ? root.theme.accent : "#1e66f5"
+            color: !root.theme ? "#1e66f5"
+                 : parent.value === "high"   ? root.theme.danger
+                 : parent.value === "low"    ? root.theme.info
+                 :                             root.theme.success
             opacity: parent._active ? 1.0 : 0
             Behavior on opacity {
                 NumberAnimation {

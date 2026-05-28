@@ -14,6 +14,7 @@ import Quickshell.Io
 import Quickshell.Wayland
 import "launcher"
 import "launcher/todos"
+import "launcher/chat"
 
 PanelWindow {
     id: launcher
@@ -125,9 +126,13 @@ PanelWindow {
         id: calcProv
         onResultsChanged: launcher._onProviderResults(11)
     }
+    ChatProvider {
+        id: chatProv
+        onResultsChanged: launcher._onProviderResults(12)
+    }
 
     Component.onCompleted: {
-        providers = [nowProv, appsProv, filesProv, styleProv, ghProv, calProv, todoProv, triggerProv, installProv, setupProv, systemProv, calcProv];
+        providers = [nowProv, appsProv, filesProv, styleProv, ghProv, calProv, todoProv, triggerProv, installProv, setupProv, systemProv, calcProv, chatProv];
         for (let i = 0; i < providers.length; i++) {
             const p = providers[i];
             if (!p) continue;
@@ -574,13 +579,58 @@ PanelWindow {
                     font.pixelSize: 18
                 }
 
+                Row {
+                    id: searchActionsRow
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.right: parent.right
+                    anchors.rightMargin: 14
+                    spacing: 6
+                    visible: launcher.mode === "provider"
+                        && launcher.activeProvIdx >= 0
+                        && (launcher.providers[launcher.activeProvIdx]?.searchActions?.length ?? 0) > 0
+
+                    Repeater {
+                        model: launcher.mode === "provider" && launcher.activeProvIdx >= 0
+                            ? (launcher.providers[launcher.activeProvIdx]?.searchActions ?? [])
+                            : []
+                        delegate: Rectangle {
+                            id: actBtn
+                            required property var modelData
+                            width: 32
+                            height: 32
+                            radius: 6
+                            color: actMa.containsMouse
+                                ? Qt.rgba(launcher.theme.fg.r, launcher.theme.fg.g, launcher.theme.fg.b, 0.10)
+                                : "transparent"
+                            border.color: launcher.theme.border
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: actBtn.modelData.icon
+                                color: launcher.theme.fg
+                                font.family: launcher.fontFamily
+                                font.pixelSize: 18
+                            }
+
+                            MouseArea {
+                                id: actMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: actBtn.modelData.triggered()
+                            }
+                        }
+                    }
+                }
+
                 TextInput {
                     id: searchField
                     anchors.verticalCenter: parent.verticalCenter
                     anchors.left: searchIcon.right
                     anchors.leftMargin: 12
-                    anchors.right: parent.right
-                    anchors.rightMargin: 18
+                    anchors.right: searchActionsRow.visible ? searchActionsRow.left : parent.right
+                    anchors.rightMargin: searchActionsRow.visible ? 10 : 18
                     color: launcher.theme.fg
                     font.family: launcher.fontFamily
                     font.pixelSize: 16
@@ -596,6 +646,8 @@ PanelWindow {
                         text: {
                             if (launcher.mode === "menu") return "Search apps, files, …";
                             const p = launcher.providers[launcher.activeProvIdx];
+                            if (p?.searchPlaceholder && p.searchPlaceholder.length > 0)
+                                return p.searchPlaceholder;
                             const label = (p?.currentTitle && p.currentTitle.length > 0)
                                 ? p.currentTitle
                                 : (p?.name ?? "");

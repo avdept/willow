@@ -48,9 +48,7 @@ Item {
             anchors.right: parent.right
             anchors.rightMargin: 14
             anchors.verticalCenter: parent.verticalCenter
-            color: addMa.containsMouse && root.theme
-                ? Qt.rgba(root.theme.fg.r, root.theme.fg.g, root.theme.fg.b, 0.10)
-                : "transparent"
+            color: addMa.containsMouse && root.theme ? Qt.rgba(root.theme.fg.r, root.theme.fg.g, root.theme.fg.b, 0.10) : "transparent"
             border.color: root.theme ? root.theme.border : "#444"
             border.width: 1
 
@@ -67,7 +65,8 @@ Item {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: if (root.provider) root.provider.openForm()
+                onClicked: if (root.provider)
+                    root.provider.openForm()
             }
         }
     }
@@ -105,22 +104,37 @@ Item {
             x: 6
             height: Math.max(52, content.implicitHeight + 16)
             radius: 6
-            color: (rowMa.containsMouse || nameLinks.containsMouse) && root.theme
-                ? Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.08)
-                : "transparent"
+            color: (rowMa.containsMouse || nameLinks.containsMouse) && root.theme ? Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.08) : "transparent"
 
             readonly property bool _done: !!row.modelData.completed_on
             readonly property bool _hasDesc: (row.modelData.description || "").length > 0
-            readonly property bool _hasDue:  (row.modelData.due_date    || "").length > 0
+            readonly property bool _hasDue: (row.modelData.due_date || "").length > 0
             readonly property bool _hasTags: Array.isArray(row.modelData.tags) && row.modelData.tags.length > 0
             readonly property bool _hasMeta: _hasDue || _hasTags
+            readonly property string _priority: row.modelData.priority || "medium"
 
+            function _priorityColor() {
+                if (_priority === "high")
+                    return root.theme.danger;
+                return _priority === "medium" ? root.theme.success : root.theme.info;
+            }
             // Declared first so it draws below the checkbox's own MouseArea.
             MouseArea {
                 id: rowMa
                 anchors.fill: parent
                 hoverEnabled: true
-                onClicked: if (root.provider) root.provider.openForm(row.modelData.id)
+                onClicked: if (root.provider)
+                    root.provider.openForm(row.modelData.id)
+            }
+
+            Rectangle {
+                id: priorityBar
+                width: 3
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.bottom: parent.bottom
+                color: row._priorityColor()
+                opacity: row._done ? 0.3 : 1.0
             }
 
             Rectangle {
@@ -131,12 +145,8 @@ Item {
                 anchors.left: parent.left
                 anchors.leftMargin: 12
                 anchors.verticalCenter: parent.verticalCenter
-                color: row._done && root.theme
-                    ? root.theme.accent
-                    : "transparent"
-                border.color: root.theme
-                    ? (row._done ? root.theme.accent : root.theme.border)
-                    : "#444"
+                color: row._done && root.theme ? root.theme.accent : "transparent"
+                border.color: root.theme ? (row._done ? root.theme.accent : root.theme.border) : "#444"
                 border.width: 1.5
 
                 Text {
@@ -153,9 +163,12 @@ Item {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                        if (!root.provider) return;
-                        if (row._done) root.provider.uncompleteTodo(row.modelData.id);
-                        else           root.provider.completeTodo(row.modelData.id);
+                        if (!root.provider)
+                            return;
+                        if (row._done)
+                            root.provider.uncompleteTodo(row.modelData.id);
+                        else
+                            root.provider.completeTodo(row.modelData.id);
                     }
                 }
             }
@@ -194,9 +207,7 @@ Item {
                         anchors.fill: parent
                         hoverEnabled: true
                         propagateComposedEvents: true
-                        cursorShape: nameText.linkAt(mouseX, mouseY).length > 0
-                            ? Qt.PointingHandCursor
-                            : Qt.ArrowCursor
+                        cursorShape: nameText.linkAt(mouseX, mouseY).length > 0 ? Qt.PointingHandCursor : Qt.ArrowCursor
                         onPressed: mouse => {
                             if (nameText.linkAt(mouse.x, mouse.y).length === 0)
                                 mouse.accepted = false;
@@ -234,20 +245,22 @@ Item {
                     opacity: row._done ? 0.5 : 0.85
                     text: {
                         const parts = [];
-                        if (row._hasDue)  parts.push(row.modelData.due_date);
-                        if (row._hasTags) parts.push(row.modelData.tags.join(", "));
+                        if (row._hasDue)
+                            parts.push(row.modelData.due_date);
+                        if (row._hasTags)
+                            parts.push(row.modelData.tags.join(", "));
                         return parts.join("  ·  ");
                     }
                 }
             }
-
         }
 
         Text {
             anchors.centerIn: parent
             visible: list.count === 0
             text: {
-                if (!root.provider) return "";
+                if (!root.provider)
+                    return "";
                 if (root.provider.searchQuery.length > 0)
                     return "No matches for \"" + root.provider.searchQuery + "\"";
                 return "No todos yet — press + to add one.";

@@ -46,6 +46,7 @@ Provider {
     property bool _ghReady: false
 
     Component.onCompleted: _checkAuth()
+    onLauncherOpenChanged: if (launcherOpen) _checkAuth()
 
     function _checkAuth() {
         emptyStateText = "Checking GitHub CLI…";

@@ -34,6 +34,13 @@ QtObject {
 
     property string currentTitle: ""
     property string emptyStateText: ""
+    // When set, overrides the launcher's default "Search <name>…"
+    // placeholder while this provider is active.
+    property string searchPlaceholder: ""
+
+    // Action buttons to render on the right side of the search bar
+    // while this provider is active. See SearchAction.qml.
+    property list<SearchAction> searchActions: []
 
     // Opt-in side-by-side details pane. Provider writes `detail` (shape
     // in DetailsPane.qml) on `selectedRow` change.
