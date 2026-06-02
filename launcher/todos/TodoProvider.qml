@@ -1,12 +1,13 @@
-// Todo provider — JSON-backed task list with reminders.
+// Todo provider — SQLite-backed task list with reminders.
 //
-// Data lives in todos.json next to this file. CRUD mutates `todos`
-// and persists immediately via FileView.setText.
+// Rows live in the `todos` table of the shared "arch-rising"
+// LocalStorage DB. CRUD writes through to SQLite, then re-loads
+// the in-memory `todos` array from the table.
 //
 // UI lives in TodoView (the customComponent root) and TodoForm
 // (the "new todo" sidebar that opens when `formOpen` is true).
 //
-// Schema per todo (see addTodo() for defaults):
+// Shape per todo (see addTodo() for defaults):
 //   id            string   opaque, generated
 //   name          string
 //   description   string
@@ -14,11 +15,11 @@
 //   completed_on  string?  ISO-8601 or null
 //   created_at    string   ISO-8601
 //   priority      string   "low" | "medium" | "high"
-//   tags          string[]
+//   tags          string[] (stored as JSON text in `tags` column)
 //   reminder_at   string?  ISO-8601 or null
 
 import QtQuick
-import Quickshell.Io
+import QtQuick.LocalStorage
 import ".."
 import "."
 
@@ -81,34 +82,44 @@ Provider {
         editingDraft = {};
     }
 
-    FileView {
-        id: store
-        path: Qt.resolvedUrl("todos.json").toString().replace(/^file:\/\//, "")
-        watchChanges: true
-        onLoaded: prov._parse(text())
-        onFileChanged: {
-            reload();
-        }
+    property var _db: null
+
+    Component.onCompleted: {
+        _openDb();
+        _load();
     }
 
-    Component.onCompleted: store.reload()
-
-    function _parse(src) {
-        if (!src || !src.length) {
-            todos = [];
-            return;
-        }
-        try {
-            const parsed = JSON.parse(src);
-            todos = Array.isArray(parsed) ? parsed : [];
-        } catch (e) {
-            console.warn("TodoProvider: failed to parse todos.json:", e);
-            todos = [];
-        }
+    function _openDb() {
+        _db = LocalStorage.openDatabaseSync("arch-rising", "1.0", "Launcher data", 5000000);
+        _db.transaction(tx => {
+            tx.executeSql("CREATE TABLE IF NOT EXISTS todos (id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '', due_date TEXT, completed_on TEXT, created_at TEXT NOT NULL, priority TEXT NOT NULL DEFAULT 'medium', tags TEXT NOT NULL DEFAULT '[]', reminder_at TEXT)");
+        });
     }
 
-    function _save() {
-        store.setText(JSON.stringify(todos, null, 2) + "\n");
+    function _load() {
+        const out = [];
+        _db.readTransaction(tx => {
+            const rs = tx.executeSql('SELECT id, name, description, due_date, completed_on, created_at, priority, tags, reminder_at FROM todos ORDER BY created_at DESC');
+            for (let i = 0; i < rs.rows.length; i++) {
+                const r = rs.rows.item(i);
+                let tags = [];
+                try {
+                    tags = JSON.parse(r.tags || '[]');
+                } catch (e) {}
+                out.push({
+                    id: r.id,
+                    name: r.name,
+                    description: r.description,
+                    due_date: r.due_date || null,
+                    completed_on: r.completed_on || null,
+                    created_at: r.created_at,
+                    priority: r.priority,
+                    tags: Array.isArray(tags) ? tags : [],
+                    reminder_at: r.reminder_at || null
+                });
+            }
+        });
+        todos = out;
     }
 
     function _newId() {
@@ -127,19 +138,29 @@ Provider {
             tags: [],
             reminder_at: null
         }, fields || {});
-        todos = todos.concat([t]);
-        _save();
+        _db.transaction(tx => {
+            tx.executeSql('INSERT INTO todos(id, name, description, due_date, completed_on, created_at, priority, tags, reminder_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [t.id, t.name, t.description, t.due_date, t.completed_on, t.created_at, t.priority, JSON.stringify(t.tags || []), t.reminder_at]);
+        });
+        _load();
         return t.id;
     }
 
     function updateTodo(id, patch) {
-        todos = todos.map(t => t.id === id ? Object.assign({}, t, patch) : t);
-        _save();
+        const existing = todos.find(t => t.id === id);
+        if (!existing)
+            return;
+        const m = Object.assign({}, existing, patch);
+        _db.transaction(tx => {
+            tx.executeSql('UPDATE todos SET name=?, description=?, due_date=?, completed_on=?, priority=?, tags=?, reminder_at=? WHERE id=?', [m.name, m.description, m.due_date, m.completed_on, m.priority, JSON.stringify(m.tags || []), m.reminder_at, id]);
+        });
+        _load();
     }
 
     function removeTodo(id) {
-        todos = todos.filter(t => t.id !== id);
-        _save();
+        _db.transaction(tx => {
+            tx.executeSql('DELETE FROM todos WHERE id = ?', [id]);
+        });
+        _load();
     }
 
     function completeTodo(id) {

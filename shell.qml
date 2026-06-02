@@ -7,6 +7,7 @@ import Quickshell.Services.SystemTray
 import Quickshell.Services.Pipewire
 import Quickshell.Services.UPower
 import Quickshell.Services.Mpris
+import "shared"
 
 Scope {
     id: root
@@ -79,10 +80,7 @@ Scope {
                     cursorShape: Qt.PointingHandCursor
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
                     onClicked: function (mouse) {
-                        const cmd = mouse.button === Qt.RightButton ? ["xdg-terminal-exec"] : ["omarchy-menu"];
-                        omarchyTrig.command = cmd;
-                        if (!omarchyTrig.running)
-                            omarchyTrig.running = true;
+                        LaunchTrigger.launch(mouse.button === Qt.RightButton ? ["xdg-terminal-exec"] : ["omarchy-menu"]);
                     }
 
                     Text {
@@ -94,10 +92,6 @@ Scope {
                         text: ""
                     }
 
-                    Process {
-                        id: omarchyTrig
-                        command: ["true"]
-                    }
                 }
 
                 Row {
@@ -230,11 +224,7 @@ Scope {
                     cursorShape: Qt.PointingHandCursor
                     visible: weatherText.text.length > 0
 
-                    onClicked: {
-                        weatherStatus.command = ["sh", "-c", "notify-send -u low \"$(omarchy-weather-status)\""];
-                        if (!weatherStatus.running)
-                            weatherStatus.running = true;
-                    }
+                    onClicked: LaunchTrigger.launch(["sh", "-c", "notify-send -u low \"$(omarchy-weather-status)\""])
 
                     Text {
                         id: weatherText
@@ -259,10 +249,6 @@ Scope {
                         stdout: StdioCollector {
                             onStreamFinished: weatherText.text = this.text.trim()
                         }
-                    }
-                    Process {
-                        id: weatherStatus
-                        command: ["true"]
                     }
                 }
 
@@ -299,9 +285,7 @@ Scope {
                     visible: updateProc.available
 
                     onClicked: {
-                        updateTrig.command = ["omarchy-launch-floating-terminal-with-presentation", "omarchy-update"];
-                        if (!updateTrig.running)
-                            updateTrig.running = true;
+                        LaunchTrigger.launch(["omarchy-launch-floating-terminal-with-presentation", "omarchy-update"]);
                         // Recheck every 30s for 5 min after click so the icon
                         // disappears soon after the user finishes updating.
                         updateRecheckTimer.attemptsLeft = 10;
@@ -347,10 +331,6 @@ Scope {
                             updateProc.available = (code === 0);
                         }
                     }
-                    Process {
-                        id: updateTrig
-                        command: ["true"]
-                    }
                 }
 
                 // Screen recording indicator — visible only while gpu-screen-recorder runs.
@@ -362,11 +342,7 @@ Scope {
                     cursorShape: Qt.PointingHandCursor
                     visible: recordingProc.active
 
-                    onClicked: {
-                        recordingTrig.command = ["omarchy-capture-screenrecording"];
-                        if (!recordingTrig.running)
-                            recordingTrig.running = true;
-                    }
+                    onClicked: LaunchTrigger.launch(["omarchy-capture-screenrecording"])
 
                     Text {
                         anchors.centerIn: parent
@@ -392,10 +368,6 @@ Scope {
                             onStreamFinished: recordingProc.active = (this.text.trim() === "1")
                         }
                     }
-                    Process {
-                        id: recordingTrig
-                        command: ["true"]
-                    }
                 }
 
                 MouseArea {
@@ -406,10 +378,7 @@ Scope {
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
 
                     onClicked: function (mouse) {
-                        const args = mouse.button === Qt.RightButton ? ["swaync-client", "-d", "-sw"] : ["swaync-client", "-t", "-sw"];
-                        bellTrig.command = args;
-                        if (!bellTrig.running)
-                            bellTrig.running = true;
+                        LaunchTrigger.launch(mouse.button === Qt.RightButton ? ["swaync-client", "-d", "-sw"] : ["swaync-client", "-t", "-sw"]);
                         if (!bellProc.running)
                             bellProc.running = true;
                     }
@@ -455,10 +424,6 @@ Scope {
                                 bellCount.unread = isNaN(n) ? 0 : n;
                             }
                         }
-                    }
-                    Process {
-                        id: bellTrig
-                        command: ["true"]
                     }
                 }
 
@@ -644,11 +609,7 @@ Scope {
                     cursorShape: Qt.PointingHandCursor
                     visible: btProc.state !== "none"
 
-                    onClicked: {
-                        btTrig.command = ["omarchy-launch-bluetooth"];
-                        if (!btTrig.running)
-                            btTrig.running = true;
-                    }
+                    onClicked: LaunchTrigger.launch(["omarchy-launch-bluetooth"])
 
                     Text {
                         anchors.centerIn: parent
@@ -685,10 +646,6 @@ Scope {
                             onStreamFinished: btProc.state = this.text.trim()
                         }
                     }
-                    Process {
-                        id: btTrig
-                        command: ["true"]
-                    }
                 }
 
                 // Network — wifi signal / ethernet / off; click: open wifi picker
@@ -699,11 +656,7 @@ Scope {
                     height: 12
                     cursorShape: Qt.PointingHandCursor
 
-                    onClicked: {
-                        netTrig.command = ["omarchy-launch-wifi"];
-                        if (!netTrig.running)
-                            netTrig.running = true;
-                    }
+                    onClicked: LaunchTrigger.launch(["omarchy-launch-wifi"])
 
                     Text {
                         id: netIcon
@@ -745,10 +698,6 @@ Scope {
                             }
                         }
                     }
-                    Process {
-                        id: netTrig
-                        command: ["true"]
-                    }
                 }
 
                 // Audio (pulseaudio) — 󰋎 + vol%; left: audio manager, right: mute, scroll: volume
@@ -766,9 +715,7 @@ Scope {
                             if (s && s.audio)
                                 s.audio.muted = !s.audio.muted;
                         } else {
-                            audioTrig.command = ["omarchy-launch-audio"];
-                            if (!audioTrig.running)
-                                audioTrig.running = true;
+                            LaunchTrigger.launch(["omarchy-launch-audio"]);
                         }
                     }
                     onWheel: function (wheel) {
@@ -795,10 +742,6 @@ Scope {
                             return "󰋎 " + Math.round(s.audio.volume * 100) + "%";
                         }
                     }
-                    Process {
-                        id: audioTrig
-                        command: ["true"]
-                    }
                 }
 
                 // CPU — left: btop, right: terminal
@@ -811,10 +754,7 @@ Scope {
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
 
                     onClicked: function (mouse) {
-                        const cmd = mouse.button === Qt.RightButton ? ["alacritty"] : ["omarchy-launch-or-focus-tui", "btop"];
-                        cpuTrig.command = cmd;
-                        if (!cpuTrig.running)
-                            cpuTrig.running = true;
+                        LaunchTrigger.launch(mouse.button === Qt.RightButton ? ["alacritty"] : ["omarchy-launch-or-focus-tui", "btop"]);
                     }
 
                     Text {
@@ -823,10 +763,6 @@ Scope {
                         font.family: root.fontFamily
                         font.pixelSize: 14
                         text: "󰍛"
-                    }
-                    Process {
-                        id: cpuTrig
-                        command: ["true"]
                     }
                 }
 
@@ -841,10 +777,7 @@ Scope {
                     visible: UPower.displayDevice && UPower.displayDevice.isPresent
 
                     onClicked: function (mouse) {
-                        const cmd = mouse.button === Qt.RightButton ? ["sh", "-c", "notify-send -u low \"$(omarchy-battery-status)\""] : ["omarchy-menu", "power"];
-                        batTrig.command = cmd;
-                        if (!batTrig.running)
-                            batTrig.running = true;
+                        LaunchTrigger.launch(mouse.button === Qt.RightButton ? ["sh", "-c", "notify-send -u low \"$(omarchy-battery-status)\""] : ["omarchy-menu", "power"]);
                     }
 
                     Text {
@@ -864,10 +797,6 @@ Scope {
                             const icon = UPower.onBattery ? dischargingIcons[idx] : chargingIcons[idx];
                             return pct + "% " + icon;
                         }
-                    }
-                    Process {
-                        id: batTrig
-                        command: ["true"]
                     }
                 }
             }

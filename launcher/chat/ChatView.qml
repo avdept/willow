@@ -3,6 +3,7 @@
 // Enter sends, handled in ChatProvider.handleKey.
 
 import QtQuick
+import QtQuick.Controls
 import "../../shared"
 
 Item {
@@ -14,21 +15,6 @@ Item {
     property var provider: null
 
     readonly property int _convPaneWidth: 210
-
-    readonly property var _displayMessages: {
-        if (!root.provider) return [];
-        const base = root.provider.currentMessages || [];
-        if (root.provider.sending) {
-            return base.concat([{
-                role: "assistant",
-                content: root.provider.pendingAssistant && root.provider.pendingAssistant.length > 0
-                    ? root.provider.pendingAssistant
-                    : "…",
-                _pending: true
-            }]);
-        }
-        return base;
-    }
 
     clip: true
 
@@ -52,6 +38,30 @@ Item {
             spacing: 2
             boundsBehavior: Flickable.StopAtBounds
 
+            ScrollBar.vertical: ScrollBar {
+                id: convSb
+                policy: ScrollBar.AsNeeded
+                width: convSb.hovered ? 10 : 6
+                visible: convSb.size < 1.0
+                Behavior on width {
+                    NumberAnimation {
+                        duration: 120
+                        easing.type: Easing.OutCubic
+                    }
+                }
+                contentItem: Rectangle {
+                    implicitWidth: convSb.width
+                    radius: width / 2
+                    color: root.theme ? root.theme.subFg : "#888"
+                    opacity: convSb.hovered ? 0.85 : 0.6
+                    Behavior on opacity {
+                        NumberAnimation {
+                            duration: 120
+                        }
+                    }
+                }
+            }
+
             delegate: Rectangle {
                 id: convRow
                 required property var modelData
@@ -59,11 +69,7 @@ Item {
                 width: ListView.view.width - 12
                 x: 6
                 height: 44
-                color: _active && root.theme
-                    ? Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.18)
-                    : (convMa.containsMouse && root.theme
-                        ? Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.06)
-                        : "transparent")
+                color: _active && root.theme ? Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.18) : (convMa.containsMouse && root.theme ? Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.06) : "transparent")
 
                 Column {
                     anchors.left: parent.left
@@ -98,7 +104,8 @@ Item {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: if (root.provider) root.provider.selectConversation(convRow.modelData.id)
+                    onClicked: if (root.provider)
+                        root.provider.selectConversation(convRow.modelData.id)
                 }
 
                 Item {
@@ -113,9 +120,7 @@ Item {
                     Text {
                         anchors.centerIn: parent
                         text: "×"
-                        color: delMa.containsMouse && root.theme
-                            ? root.theme.danger
-                            : (root.theme ? root.theme.subFg : "#888")
+                        color: delMa.containsMouse && root.theme ? root.theme.danger : (root.theme ? root.theme.subFg : "#888")
                         font.family: root.fontFamily
                         font.pixelSize: 14
                     }
@@ -125,7 +130,8 @@ Item {
                         anchors.fill: parent
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: if (root.provider) root.provider.deleteConversation(convRow.modelData.id)
+                        onClicked: if (root.provider)
+                            root.provider.deleteConversation(convRow.modelData.id)
                     }
                 }
             }
@@ -173,13 +179,13 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: root.provider && (root.provider.sending || root.provider.lastError.length > 0)
                 text: {
-                    if (!root.provider) return "";
-                    if (root.provider.sending) return "thinking…";
+                    if (!root.provider)
+                        return "";
+                    if (root.provider.sending)
+                        return "thinking…";
                     return root.provider.lastError;
                 }
-                color: root.provider && root.provider.lastError.length > 0 && !root.provider.sending && root.theme
-                    ? root.theme.danger
-                    : (root.theme ? root.theme.subFg : "#888")
+                color: root.provider && root.provider.lastError.length > 0 && !root.provider.sending && root.theme ? root.theme.danger : (root.theme ? root.theme.subFg : "#888")
                 font.family: root.fontFamily
                 font.pixelSize: 11
                 opacity: 0.85
@@ -194,9 +200,7 @@ Item {
                 height: 20
                 width: stopText.implicitWidth + 14
                 radius: 4
-                color: stopMa.containsMouse && root.theme
-                    ? Qt.rgba(root.theme.danger.r, root.theme.danger.g, root.theme.danger.b, 0.14)
-                    : "transparent"
+                color: stopMa.containsMouse && root.theme ? Qt.rgba(root.theme.danger.r, root.theme.danger.g, root.theme.danger.b, 0.14) : "transparent"
                 border.color: root.theme ? root.theme.danger : "#d20f39"
                 border.width: 1
 
@@ -215,7 +219,8 @@ Item {
                     anchors.fill: parent
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: if (root.provider) root.provider.stopStream()
+                    onClicked: if (root.provider)
+                        root.provider.stopStream()
                 }
             }
         }
@@ -237,17 +242,84 @@ Item {
             anchors.top: chatHeaderDivider.bottom
             anchors.bottom: parent.bottom
             clip: true
-            model: root._displayMessages
+            model: root.provider ? root.provider.currentMessages : []
             spacing: 8
             topMargin: 12
             bottomMargin: 12
             boundsBehavior: Flickable.StopAtBounds
+            cacheBuffer: 100000
+            reuseItems: false
+
+            ScrollBar.vertical: ScrollBar {
+                id: msgSb
+                policy: ScrollBar.AsNeeded
+                width: msgSb.hovered ? 10 : 6
+                visible: msgSb.size < 1.0
+                Behavior on width {
+                    NumberAnimation {
+                        duration: 120
+                        easing.type: Easing.OutCubic
+                    }
+                }
+                contentItem: Rectangle {
+                    implicitWidth: msgSb.width
+                    radius: width / 2
+                    color: root.theme ? root.theme.subFg : "#888"
+                    opacity: msgSb.hovered ? 0.85 : 0.6
+                    Behavior on opacity {
+                        NumberAnimation {
+                            duration: 120
+                        }
+                    }
+                }
+            }
 
             onCountChanged: Qt.callLater(() => positionViewAtEnd())
             Connections {
                 target: root.provider
                 function onPendingAssistantChanged() {
-                    Qt.callLater(() => msgList.positionViewAtEnd());
+                    if (root.provider && root.provider.sending)
+                        Qt.callLater(() => msgList.positionViewAtEnd());
+                }
+                function onSendingChanged() {
+                    if (root.provider && root.provider.sending)
+                        Qt.callLater(() => msgList.positionViewAtEnd());
+                }
+            }
+
+            footer: Item {
+                width: msgList.width
+                height: streamBubble.visible ? streamBubble.height + 12 : 0
+                visible: root.provider && root.provider.sending
+
+                Rectangle {
+                    id: streamBubble
+                    visible: parent.visible
+                    anchors.left: parent.left
+                    anchors.leftMargin: 14
+                    width: Math.min(msgList.width - 28, streamText.contentWidth + 18)
+                    height: streamText.contentHeight + 18
+                    radius: 8
+                    color: root.theme ? Qt.rgba(root.theme.fg.r, root.theme.fg.g, root.theme.fg.b, 0.06) : "#eee"
+
+                    Text {
+                        id: streamText
+                        x: 9
+                        y: 9
+                        width: msgList.width - 28 - 18
+                        text: {
+                            if (!root.provider)
+                                return "";
+                            const p = root.provider.pendingAssistant;
+                            return p && p.length > 0 ? p : "…";
+                        }
+                        color: root.theme ? root.theme.fg : "#000"
+                        linkColor: root.theme ? root.theme.accent : "#1e66f5"
+                        font.family: root.fontFamily
+                        font.pixelSize: 13
+                        wrapMode: Text.Wrap
+                        textFormat: Text.MarkdownText
+                    }
                 }
             }
 
@@ -269,9 +341,7 @@ Item {
                     anchors.right: msgRow._isUser ? parent.right : undefined
                     anchors.leftMargin: 14
                     anchors.rightMargin: 14
-                    color: msgRow._isUser && root.theme
-                        ? Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.16)
-                        : (root.theme ? Qt.rgba(root.theme.fg.r, root.theme.fg.g, root.theme.fg.b, 0.06) : "#eee")
+                    color: msgRow._isUser && root.theme ? Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.16) : (root.theme ? Qt.rgba(root.theme.fg.r, root.theme.fg.g, root.theme.fg.b, 0.06) : "#eee")
 
                     Text {
                         id: msgText
@@ -302,7 +372,8 @@ Item {
                 horizontalAlignment: Text.AlignHCenter
                 visible: msgList.count === 0
                 text: {
-                    if (!root.provider) return "";
+                    if (!root.provider)
+                        return "";
                     if (root.provider.currentModel.length === 0) {
                         const be = root.provider.currentBackend;
                         return be ? "No models loaded in " + be.name + "." : "No model.";

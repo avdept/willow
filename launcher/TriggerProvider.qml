@@ -60,6 +60,50 @@ Provider {
                 kind: "spawn",
                 argv: ["sh", "-c", "pkill hyprpicker || hyprpicker -a"]
             }
+        },
+        {
+            title: "Share",
+            subtitle: "Send clipboard, files, or folders via LocalSend",
+            iconText: "",
+            chevron: true,
+            score: 600,
+            data: {
+                kind: "drill",
+                view: "share"
+            }
+        }
+    ]
+
+    readonly property var _shareRows: [
+        {
+            title: "Clipboard",
+            subtitle: "Send the current clipboard contents",
+            iconText: "",
+            score: 1000,
+            data: {
+                kind: "spawn",
+                argv: ["omarchy-menu-share", "clipboard"]
+            }
+        },
+        {
+            title: "File",
+            subtitle: "Pick one or more files to send",
+            iconText: "",
+            score: 900,
+            data: {
+                kind: "terminal",
+                argv: ["bash", "-c", "omarchy-menu-share file"]
+            }
+        },
+        {
+            title: "Folder",
+            subtitle: "Pick a folder to send",
+            iconText: "",
+            score: 800,
+            data: {
+                kind: "terminal",
+                argv: ["bash", "-c", "omarchy-menu-share folder"]
+            }
         }
     ]
 
@@ -114,7 +158,12 @@ Provider {
 
     function search(text) {
         const q = norm(text);
-        results = view === "screenrecord" ? _screenrecordResults(q) : _rootResults(q);
+        if (view === "screenrecord")
+            results = _screenrecordResults(q);
+        else if (view === "share")
+            results = _filter(_shareRows, q);
+        else
+            results = _rootResults(q);
     }
 
     function _rootResults(q) {
@@ -180,6 +229,11 @@ Provider {
         }
         if (d.kind === "spawn" && d.argv) {
             _pendingArgv = d.argv;
+            activateTimer.restart();
+            return;
+        }
+        if (d.kind === "terminal" && d.argv) {
+            _pendingArgv = ["xdg-terminal-exec", "--app-id=org.omarchy.terminal"].concat(d.argv);
             activateTimer.restart();
         }
     }

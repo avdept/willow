@@ -32,6 +32,7 @@ Provider {
     requestedHeight: 640
 
     aggregateInSearch: false
+    showAsCategory: false
 
     property var backends: [({
                 id: "ollama",
@@ -60,13 +61,10 @@ Provider {
     property string openDropdown: ""
 
     property var _db: null
+    property string _preferredModel: ""
     property string _streamConvId: ""
     property string _streamBuffer: ""
     property string _rawStdout: ""
-    // Tracks the transition between reasoning_content and content chunks
-    // (Qwen, DeepSeek, etc. reasoning models) so we can drop a separator
-    // between thinking and the actual answer.
-    property string _lastDeltaKind: ""
 
     function _newId() {
         return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -78,6 +76,7 @@ Provider {
             tx.executeSql('CREATE TABLE IF NOT EXISTS conversations (' + 'id TEXT PRIMARY KEY,' + 'title TEXT,' + 'model TEXT,' + 'backend TEXT,' + 'created_at INTEGER,' + 'updated_at INTEGER)');
             tx.executeSql('CREATE TABLE IF NOT EXISTS messages (' + 'id INTEGER PRIMARY KEY AUTOINCREMENT,' + 'conversation_id TEXT NOT NULL,' + 'role TEXT NOT NULL,' + 'content TEXT NOT NULL,' + 'created_at INTEGER NOT NULL)');
             tx.executeSql('CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, created_at)');
+            tx.executeSql('CREATE TABLE IF NOT EXISTS defaults (' + 'id INTEGER PRIMARY KEY CHECK(id = 1),' + 'backend TEXT,' + 'model TEXT)');
         });
         // Idempotent: adds `backend` to conversations tables created
         // before that column existed. Throws "duplicate column" on
@@ -85,7 +84,29 @@ Provider {
         try {
             _db.transaction(tx => tx.executeSql('ALTER TABLE conversations ADD COLUMN backend TEXT'));
         } catch (e) {}
-        console.log("ChatProvider: SQLite at", LocalStorage.databasesPath);
+    }
+
+    function _loadDefaults() {
+        _db.readTransaction(tx => {
+            const rs = tx.executeSql('SELECT backend, model FROM defaults WHERE id = 1');
+            if (rs.rows.length === 0)
+                return;
+            const r = rs.rows.item(0);
+            if (r.backend) {
+                const idx = backends.findIndex(b => b.id === r.backend);
+                if (idx >= 0)
+                    currentBackendIdx = idx;
+            }
+            _preferredModel = r.model || "";
+        });
+    }
+
+    function _saveDefaults() {
+        if (!_db)
+            return;
+        _db.transaction(tx => {
+            tx.executeSql('INSERT OR REPLACE INTO defaults(id, backend, model) VALUES (1, ?, ?)', [currentBackend.id, currentModel]);
+        });
     }
 
     function _loadConversations() {
@@ -168,6 +189,7 @@ Provider {
         availableModels = [];
         currentModel = "";
         lastError = "";
+        _saveDefaults();
         _fetchModels();
     }
 
@@ -251,7 +273,6 @@ Provider {
         _streamConvId = convId;
         _streamBuffer = "";
         _rawStdout = "";
-        _lastDeltaKind = "";
         pendingAssistant = "";
         sending = true;
         streamProc.command = ["curl", "-N", "-sS", "-X", "POST", "-H", "content-type: application/json", "-H", "accept: text/event-stream", "-d", body, be.baseUrl + "/chat/completions"];
@@ -281,22 +302,11 @@ Provider {
             }
             const ch = d.choices && d.choices[0];
             const delta = ch && (ch.delta || ch.message);
-            const reasoning = delta && typeof delta.reasoning_content === "string" ? delta.reasoning_content : "";
             const content = delta && typeof delta.content === "string" ? delta.content : "";
-            if (reasoning.length) {
-                if (_lastDeltaKind === "content")
-                    _streamBuffer += "\n\n";
-                _streamBuffer += reasoning;
-                _lastDeltaKind = "reasoning";
-            }
             if (content.length) {
-                if (_lastDeltaKind === "reasoning")
-                    _streamBuffer += "\n\n";
                 _streamBuffer += content;
-                _lastDeltaKind = "content";
-            }
-            if (reasoning.length || content.length)
                 pendingAssistant = _streamBuffer;
+            }
         } catch (e) {
             console.warn("ChatProvider: bad SSE line:", e, line);
         }
@@ -355,7 +365,11 @@ Provider {
                     const data = JSON.parse(xhr.responseText);
                     const ms = (data.data || []).map(m => m.id);
                     availableModels = ms;
-                    currentModel = ms.length > 0 ? ms[0] : "";
+                    const preferred = _preferredModel;
+                    if (preferred && ms.indexOf(preferred) >= 0)
+                        currentModel = preferred;
+                    else
+                        currentModel = ms.length > 0 ? ms[0] : "";
                     lastError = ms.length === 0 ? "No models loaded in " + be.name : "";
                 } catch (e) {
                     console.warn("ChatProvider: failed to parse /v1/models:", e);
@@ -372,6 +386,7 @@ Provider {
 
     Component.onCompleted: {
         _openDb();
+        _loadDefaults();
         _loadConversations();
         _fetchModels();
     }
@@ -472,6 +487,7 @@ Provider {
                         if (!footerRoot.provider)
                             return;
                         footerRoot.provider.currentModel = item;
+                        footerRoot.provider._saveDefaults();
                         footerRoot.provider.openDropdown = "";
                     }
                 }
