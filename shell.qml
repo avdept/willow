@@ -1,3 +1,5 @@
+//@ pragma UseQApplication
+
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -35,6 +37,23 @@ Scope {
         id: launcher
         theme: theme
         fontFamily: root.fontFamily
+    }
+
+    // Notification drawer (right-side panel) + transient toasts.
+    // Toggle drawer via: qs ipc call notifs toggle
+    // The drawer reads from the FDN daemon in shared/NotificationManager.qml;
+    // while swaync is running it will own the bus and no notifications will
+    // reach the QS daemon — the UI still renders for visual review.
+    NotificationDrawer {
+        id: notificationDrawer
+        theme: theme
+        fontFamily: root.fontFamily
+    }
+    NotificationToasts {
+        id: notificationToasts
+        theme: theme
+        fontFamily: root.fontFamily
+        drawerOpen: notificationDrawer.open
     }
 
     Variants {
@@ -371,16 +390,20 @@ Scope {
                 }
 
                 MouseArea {
+                    id: bellArea
                     anchors.verticalCenter: parent.verticalCenter
                     width: bellRow.implicitWidth + 4
                     height: 22
                     cursorShape: Qt.PointingHandCursor
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
 
+                    readonly property int unread: NotificationManager.trackedNotifications.values.length
+
                     onClicked: function (mouse) {
-                        LaunchTrigger.launch(mouse.button === Qt.RightButton ? ["swaync-client", "-d", "-sw"] : ["swaync-client", "-t", "-sw"]);
-                        if (!bellProc.running)
-                            bellProc.running = true;
+                        if (mouse.button === Qt.RightButton)
+                            NotificationManager.clearAll();
+                        else
+                            notificationDrawer.open = !notificationDrawer.open;
                     }
 
                     Row {
@@ -393,36 +416,15 @@ Scope {
                             color: root.cFg
                             font.family: root.fontFamily
                             font.pixelSize: 15
-                            text: bellCount.unread > 0 ? "󰂚" : "󰂜"
+                            text: bellArea.unread > 0 ? "󰂚" : "󰂜"
                         }
                         Text {
-                            id: bellCount
                             anchors.verticalCenter: parent.verticalCenter
-                            property int unread: 0
                             color: root.cFg
                             font.family: root.fontFamily
                             font.pixelSize: 11
-                            text: unread > 0 ? unread.toString() : ""
-                            visible: unread > 0
-                        }
-                    }
-
-                    Timer {
-                        interval: 2000
-                        running: true
-                        repeat: true
-                        triggeredOnStart: true
-                        onTriggered: if (!bellProc.running)
-                            bellProc.running = true
-                    }
-                    Process {
-                        id: bellProc
-                        command: ["swaync-client", "-c"]
-                        stdout: StdioCollector {
-                            onStreamFinished: {
-                                const n = parseInt(this.text.trim(), 10);
-                                bellCount.unread = isNaN(n) ? 0 : n;
-                            }
+                            text: bellArea.unread > 0 ? bellArea.unread.toString() : ""
+                            visible: bellArea.unread > 0
                         }
                     }
                 }
@@ -490,9 +492,10 @@ Scope {
                 Row {
                     id: trayContainer
                     anchors.verticalCenter: parent.verticalCenter
-                    spacing: 6
+                    spacing: 0
 
                     property bool expanded: false
+                    readonly property int drawerGap: 6
 
                     HoverHandler {
                         id: trayHover
@@ -534,7 +537,7 @@ Scope {
                         anchors.verticalCenter: parent.verticalCenter
                         height: 18
                         clip: true
-                        width: trayContainer.expanded ? trayItems.implicitWidth : 0
+                        width: trayContainer.expanded ? trayItems.implicitWidth + trayContainer.drawerGap : 0
                         opacity: trayContainer.expanded ? 1 : 0
 
                         Behavior on width {
@@ -552,29 +555,35 @@ Scope {
                         Row {
                             id: trayItems
                             anchors.verticalCenter: parent.verticalCenter
-                            spacing: 8
+                            anchors.left: parent.left
+                            anchors.leftMargin: trayContainer.drawerGap
+                            spacing: 14
 
                             Repeater {
                                 model: SystemTray.items
 
                                 delegate: MouseArea {
+                                    id: trayItem
                                     required property var modelData
                                     width: 12
                                     height: 12
                                     cursorShape: Qt.PointingHandCursor
                                     acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
 
+                                    function _openMenu() {
+                                        if (!modelData.hasMenu) return;
+                                        trayMenu.anchor.rect.x = trayItem.mapToItem(bar.contentItem, 0, 0).x;
+                                        trayMenu.open();
+                                    }
+
                                     onClicked: function (mouse) {
                                         if (mouse.button === Qt.LeftButton) {
-                                            if (modelData.onlyMenu)
-                                                trayMenu.open();
-                                            else
-                                                modelData.activate();
+                                            if (modelData.onlyMenu) _openMenu();
+                                            else                    modelData.activate();
                                         } else if (mouse.button === Qt.MiddleButton) {
                                             modelData.secondaryActivate();
                                         } else if (mouse.button === Qt.RightButton) {
-                                            if (modelData.hasMenu)
-                                                trayMenu.open();
+                                            _openMenu();
                                         }
                                     }
                                     onWheel: function (wheel) {
@@ -592,6 +601,7 @@ Scope {
                                         menu: modelData.menu
                                         anchor.window: bar
                                         anchor.rect.y: bar.implicitHeight
+                                        anchor.rect.width: trayItem.width
                                         anchor.edges: Edges.Bottom
                                     }
                                 }

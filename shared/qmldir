@@ -1,2 +1,3 @@
 singleton LaunchTrigger 1.0 LaunchTrigger.qml
+singleton NotificationManager 1.0 NotificationManager.qml
 Dropdown 1.0 Dropdown.qml

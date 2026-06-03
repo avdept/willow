@@ -43,6 +43,9 @@ PanelWindow {
 
     property bool open: false
     property string mode: "menu"          // "menu" | "provider"
+    // Chromeless: hide search row + category rail, keep footer. Set by
+    // `showBareProvider` IPC; cleared on hide. Esc closes (no back-to-menu).
+    property bool bareMode: false
     property int activeProvIdx: -1
     property string queryText: ""
     property int currentIndex: 0
@@ -70,6 +73,8 @@ PanelWindow {
         function show()   { launcher.show() }
         function hide()   { launcher.hide() }
         function showProvider(name: string) { launcher.showProvider(name) }
+        function showBareProvider(name: string) { launcher.showBareProvider(name, "") }
+        function showBareProviderView(name: string, view: string) { launcher.showBareProvider(name, view) }
     }
 
     // ── Providers ────────────────────────────────────────────────────────
@@ -180,12 +185,30 @@ PanelWindow {
         });
     }
 
+    function showBareProvider(name, view) {
+        const idx = providers.findIndex(p => p && p.name && p.name.toLowerCase() === (name || "").toLowerCase());
+        if (idx < 0) { show(); return; }
+        _resetState();
+        bareMode = true;
+        _computeLeft();
+        open = true;
+        Qt.callLater(() => {
+            enterProviderById(idx, "");
+            if (view && view.length > 0) {
+                const p = providers[idx];
+                if (p && p._setView) p._setView(view);
+            }
+            searchField.forceActiveFocus();
+        });
+    }
+
     function _resetState() {
         mode = "menu";
         activeProvIdx = -1;
         queryText = "";
         currentIndex = 0;
         rightModel = [];
+        bareMode = false;
         for (let i = 0; i < providers.length; i++)
             if (providers[i] && providers[i].reset) providers[i].reset();
         _syncRightLayout();
@@ -299,6 +322,7 @@ PanelWindow {
 
     function goBack() {
         if (mode === "provider") {
+            if (bareMode) { hide(); return; }
             const p = providers[activeProvIdx];
             if (p && p.goBack && p.goBack()) return;
             backToMenu();
@@ -535,7 +559,9 @@ PanelWindow {
         Binding {
             target: launcher
             property: "categoryListWidth"
-            value: launcher.mode === "provider" ? launcher.categoryRailWidth : body.width
+            value: launcher.bareMode
+                ? 0
+                : (launcher.mode === "provider" ? launcher.categoryRailWidth : body.width)
         }
 
         Binding {
@@ -555,6 +581,11 @@ PanelWindow {
             value: {
                 const def = launcher.defaultCardHeight;
                 if (launcher.mode !== "provider") return launcher._clampHeight(def);
+                if (launcher.bareMode && launcher.rightLayout === "list") {
+                    const chrome = launcher.searchRowHeight + launcher.dividerHeight + launcher.footerHeight;
+                    const content = Math.max(rightList.contentHeight + rightList.topMargin + rightList.bottomMargin, 120);
+                    return launcher._clampHeight(chrome + content);
+                }
                 const p = launcher.providers[launcher.activeProvIdx];
                 const req = p ? p.requestedHeight : 0;
                 return launcher._clampHeight(req > 0 ? req : def);
@@ -723,7 +754,10 @@ PanelWindow {
                     bottomMargin: 6
                     boundsBehavior: Flickable.StopAtBounds
 
-                    Behavior on width { NumberAnimation { duration: launcher.collapseAnimDuration; easing.type: Easing.OutCubic } }
+                    Behavior on width {
+                        enabled: !launcher.bareMode
+                        NumberAnimation { duration: launcher.collapseAnimDuration; easing.type: Easing.OutCubic }
+                    }
 
                     Component {
                         id: leftFullDelegate
@@ -782,7 +816,7 @@ PanelWindow {
                     height: parent.height
                     anchors.left: leftList.right
                     color: launcher.theme.border
-                    visible: launcher.mode === "provider"
+                    visible: launcher.mode === "provider" && !launcher.bareMode
                 }
 
                 // Provider results pane — list layout (default).
