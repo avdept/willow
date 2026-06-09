@@ -19,6 +19,18 @@ NotificationServer {
     signal newNotification(var notif)
 
     property var _timestamps: ({})
+    property int _revision: 0
+    readonly property int count: server.trackedNotifications.values.length
+    readonly property var notifications: {
+        server.count;
+        server._revision;
+        return server.newestFirst();
+    }
+    readonly property var groups: {
+        server.count;
+        server._revision;
+        return server.groupedByApp();
+    }
 
     onNotification: function (notif) {
         // If the notif is already tracked, it's a replace/update or a reload
@@ -29,6 +41,7 @@ NotificationServer {
         notif.tracked = true;
         if (!wasAlreadyTracked)
             _timestamps[notif.id] = Date.now();
+        _revision++;
         if (!wasAlreadyTracked)
             newNotification(notif);
     }
@@ -75,6 +88,11 @@ NotificationServer {
         return notif.actions.filter(a => a.identifier !== "default");
     }
 
+    function actionText(action) {
+        if (!action) return "";
+        return action.text || action.identifier || "";
+    }
+
     // Returns 0..100 if the notification carries a `value` hint (download
     // progress etc.), or -1 if absent.
     function progressOf(notif) {
@@ -88,12 +106,15 @@ NotificationServer {
 
     function activateDefault(notif) {
         const a = defaultActionOf(notif);
-        if (a) {
-            a.invoke();
-            notif.dismiss();
-            return true;
-        }
+        if (a)
+            return invokeAction(notif, a);
         return false;
+    }
+
+    function invokeAction(notif, action) {
+        if (!notif || !action) return false;
+        action.invoke();
+        return true;
     }
 
     function newestFirst() {

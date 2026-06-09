@@ -10,6 +10,7 @@ import Quickshell.Services.Pipewire
 import Quickshell.Services.UPower
 import Quickshell.Services.Mpris
 import "shared"
+import "modules/osd"
 
 Scope {
     id: root
@@ -54,6 +55,14 @@ Scope {
         theme: theme
         fontFamily: root.fontFamily
         drawerOpen: notificationDrawer.open
+    }
+
+    // Volume / mic / brightness / lock OSD (bottom-center). Replaces swayosd.
+    // Brightness is driven by `qs ipc call osd brightness` from the media keys.
+    Osd {
+        id: osd
+        theme: theme
+        fontFamily: root.fontFamily
     }
 
     Variants {
@@ -397,7 +406,7 @@ Scope {
                     cursorShape: Qt.PointingHandCursor
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
 
-                    readonly property int unread: NotificationManager.trackedNotifications.values.length
+                    readonly property int unread: NotificationManager.count
 
                     onClicked: function (mouse) {
                         if (mouse.button === Qt.RightButton)

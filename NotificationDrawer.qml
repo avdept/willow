@@ -2,7 +2,7 @@
 //
 // Covers the full screen with exclusionMode Ignore so a click outside the
 // surface (or Escape) closes it; the visible surface is inset to the right
-// edge and slides in/out. Reads from NotificationManager.trackedNotifications.
+// edge and slides in/out. Reads from NotificationManager.groups.
 
 import QtQuick
 import QtQuick.Controls
@@ -119,8 +119,8 @@ PanelWindow {
             anchors.leftMargin: 8
             anchors.rightMargin: 8
             height: 40
-            radius: 8
-            color: Qt.rgba(drawer.theme.bg.r, drawer.theme.bg.g, drawer.theme.bg.b, 0.92)
+            radius: 0
+            color: Qt.rgba(drawer.theme.bg.r, drawer.theme.bg.g, drawer.theme.bg.b, 0.78)
             border.color: drawer.theme.border
             border.width: 1
 
@@ -129,7 +129,7 @@ PanelWindow {
                 anchors.left: parent.left
                 anchors.leftMargin: 14
                 anchors.verticalCenter: parent.verticalCenter
-                text: NotificationManager.trackedNotifications.values.length > 0 ? "Notifications" : "No notifications"
+                text: NotificationManager.count > 0 ? "Notifications" : "No notifications"
                 color: drawer.theme.fg
                 font.family: drawer.fontFamily
                 font.pixelSize: 13
@@ -140,11 +140,11 @@ PanelWindow {
                 anchors.left: titleText.right
                 anchors.leftMargin: 8
                 anchors.verticalCenter: parent.verticalCenter
-                text: NotificationManager.trackedNotifications.values.length
+                text: NotificationManager.count
                 color: drawer.theme.subFg
                 font.family: drawer.fontFamily
                 font.pixelSize: 11
-                visible: NotificationManager.trackedNotifications.values.length > 0
+                visible: NotificationManager.count > 0
             }
 
             MouseArea {
@@ -154,24 +154,23 @@ PanelWindow {
                 width: clearText.implicitWidth + 12
                 height: 24
                 cursorShape: Qt.PointingHandCursor
-                visible: NotificationManager.trackedNotifications.values.length > 0
+                visible: NotificationManager.count > 0
                 onClicked: NotificationManager.clearAll()
 
                 Rectangle {
                     anchors.fill: parent
                     radius: 4
-                    color: "transparent"
-                    border.color: drawer.theme.border
-                    border.width: 1
+                    color: drawer.theme.accent
                 }
 
                 Text {
                     id: clearText
                     anchors.centerIn: parent
                     text: "Clear all"
-                    color: drawer.theme.fg
+                    color: drawer.theme.bg
                     font.family: drawer.fontFamily
                     font.pixelSize: 11
+                    font.bold: true
                 }
             }
         }
@@ -199,10 +198,7 @@ PanelWindow {
                 spacing: 12
 
                 Repeater {
-                    model: {
-                        NotificationManager.trackedNotifications.values.length;
-                        return NotificationManager.groupedByApp();
-                    }
+                    model: NotificationManager.groups
 
                     delegate: Column {
                         id: groupWrapper
@@ -213,74 +209,6 @@ PanelWindow {
 
                         width: parent.width
                         spacing: 6
-
-                        Rectangle {
-                            visible: groupWrapper.isMany
-                            width: parent.width - 16
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            height: 28
-                            radius: 4
-                            color: "transparent"
-
-                            MouseArea {
-                                anchors.fill: parent
-                                anchors.rightMargin: 28
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: drawer.expandedKey = groupWrapper.isExpanded ? "" : groupWrapper.group.key
-                            }
-
-                            Row {
-                                anchors.left: parent.left
-                                anchors.leftMargin: 4
-                                anchors.verticalCenter: parent.verticalCenter
-                                spacing: 6
-
-                                IconImage {
-                                    width: 14
-                                    height: 14
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    source: NotificationManager.iconUrl(groupWrapper.group.appIcon)
-                                    visible: source.toString().length > 0
-                                    smooth: true
-                                }
-
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: groupWrapper.group.appName + " · " + groupWrapper.group.notifs.length
-                                    color: drawer.theme.fg
-                                    font.family: drawer.fontFamily
-                                    font.pixelSize: 11
-                                    font.bold: true
-                                }
-
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: groupWrapper.isExpanded ? "⌃" : "⌄"
-                                    color: drawer.theme.subFg
-                                    font.family: drawer.fontFamily
-                                    font.pixelSize: 11
-                                }
-                            }
-
-                            MouseArea {
-                                id: groupCloseBtn
-                                anchors.right: parent.right
-                                anchors.rightMargin: 4
-                                anchors.verticalCenter: parent.verticalCenter
-                                width: 18
-                                height: 18
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: NotificationManager.dismissGroup(groupWrapper.group.key)
-
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "×"
-                                    color: drawer.theme.subFg
-                                    font.family: drawer.fontFamily
-                                    font.pixelSize: 14
-                                }
-                            }
-                        }
 
                         Item {
                             id: stackArea
@@ -310,21 +238,38 @@ PanelWindow {
                                     fontFamily: drawer.fontFamily
                                     now: drawer._now
                                     width: stackArea.width
+                                    inGroup: groupWrapper.isMany
 
                                     z: 1000 - index
+
+                                    groupExpandable: groupWrapper.isMany && index === 0
+                                    groupExpanded: groupWrapper.isExpanded
+                                    dismissesGroup: groupWrapper.isMany && index === 0 && !groupWrapper.isExpanded
+
+                                    onGroupToggleRequested:
+                                        drawer.expandedKey = groupWrapper.isExpanded ? "" : groupWrapper.group.key
+                                    onGroupDismissRequested:
+                                        NotificationManager.dismissGroup(groupWrapper.group.key)
 
                                     _expandProgress: (stackArea.collapsed && index >= stackArea.maxStack) ? 0 : 1
 
                                     onClicked: {
+                                        // Ignore the synthetic click emitted while the
+                                        // delegate is torn down on reload (see the toast
+                                        // onClicked guard).
+                                        if (typeof stackedCard._dismiss !== "function")
+                                            return;
                                         if (stackArea.collapsed) {
                                             drawer.expandedKey = groupWrapper.group.key;
-                                        } else {
-                                            const a = NotificationManager.defaultActionOf(stackedCard.notif);
-                                            if (a) {
-                                                a.invoke();
-                                                stackedCard._dismiss();
-                                            }
+                                            return;
                                         }
+                                        const a = NotificationManager.defaultActionOf(stackedCard.notif);
+                                        if (a) {
+                                            const n = stackedCard.notif;
+                                            NotificationManager.invokeAction(n, a);
+                                        }
+                                        stackedCard._dismiss();
+                                        drawer.open = false;
                                     }
 
                                     y: {
