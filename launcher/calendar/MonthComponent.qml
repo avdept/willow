@@ -4,6 +4,7 @@
 
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Effects
 
 Item {
     id: root
@@ -29,6 +30,47 @@ Item {
     // parent.right when this flips on — that's what shrinks the grid.
     readonly property bool _showDetails:
         root.provider && root.provider.selectedEvent !== null
+
+    // Day whose events are expanded (set by tapping "+N more"); "" means none.
+    // Cleared when the displayed month/year changes. The expansion renders as
+    // a root-level popup (see dayPopup) so it can be wider than the cell, cast
+    // a shadow, and be dismissed by a click-catcher behind it.
+    property string expandedDateKey: ""
+    // Source cell geometry in root coordinates, captured when opening.
+    property real _exX: 0
+    property real _exY: 0
+    property real _exW: 0
+    property real _exH: 0
+
+    function _openExpansion(cell) {
+        const p = cell.mapToItem(root, 0, 0);
+        root._exX = p.x;
+        root._exY = p.y;
+        root._exW = cell.width;
+        root._exH = cell.height;
+        root.expandedDateKey = cell._dateKey;
+    }
+
+    // Events for the expanded day, filtered like the cells.
+    readonly property var _expandedEvents: {
+        if (!provider || !provider.eventsModel || expandedDateKey === "") return [];
+        const all = provider.eventsModel.eventsByDate[expandedDateKey] || [];
+        const q = provider.searchQuery || "";
+        return q.length === 0 ? all
+            : all.filter(e => (e.summary || "").toLowerCase().indexOf(q) !== -1);
+    }
+    readonly property int _expandedDay: {
+        if (expandedDateKey === "") return 0;
+        const d = new Date(expandedDateKey + "T00:00:00");
+        return isNaN(d.getTime()) ? 0 : d.getDate();
+    }
+
+    Connections {
+        target: root.provider
+        ignoreUnknownSignals: true
+        function onDisplayedMonthChanged() { root.expandedDateKey = ""; }
+        function onDisplayedYearChanged()  { root.expandedDateKey = ""; }
+    }
 
     Item {
         id: header
@@ -63,7 +105,7 @@ Item {
                 signal clicked()
                 width: label.length > 0 ? 60 : 28
                 height: 28
-                radius: 6
+                radius: root.theme.radius
                 color: ma.containsMouse && root.theme
                     ? Qt.rgba(root.theme.fg.r, root.theme.fg.g, root.theme.fg.b, 0.08)
                     : "transparent"
@@ -183,6 +225,11 @@ Item {
             height: grid.availableHeight / 6
             readonly property bool inMonth: model.month === grid.month
             readonly property bool isToday: model.today === true
+            readonly property string _dateKey: Qt.formatDate(model.date, "yyyy-MM-dd")
+            readonly property bool _expanded: root.expandedDateKey === cell._dateKey
+            // Raise above sibling cells so the inline expansion overlay can
+            // extend over neighbouring days.
+            z: _expanded ? 10 : 0
 
             color: {
                 if (!root.theme) return "transparent";
@@ -259,7 +306,7 @@ Item {
                         required property var modelData
                         width: eventsCol.width
                         height: 14
-                        radius: 3
+                        radius: root.theme.radius
                         clip: true
                         color: root._chipBg(chipArea.containsMouse)
                         opacity: cell.inMonth ? 1.0 : 0.55
@@ -319,13 +366,21 @@ Item {
                     }
                 }
 
-                Text {
+                MouseArea {
                     visible: cell._overflow
-                    text: "+" + (cell.events.length - (cell._maxChips - 1)) + " more"
-                    color: root.theme ? root.theme.subFg : "#888"
-                    font.family: root.fontFamily
-                    font.pixelSize: 9
-                    opacity: cell.inMonth ? 0.85 : 0.45
+                    width: moreText.implicitWidth
+                    height: moreText.implicitHeight
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root._openExpansion(cell)
+
+                    Text {
+                        id: moreText
+                        text: "+" + (cell.events.length - (cell._maxChips - 1)) + " more"
+                        color: root.theme ? root.theme.subFg : "#888"
+                        font.family: root.fontFamily
+                        font.pixelSize: 9
+                        opacity: cell.inMonth ? 0.85 : 0.45
+                    }
                 }
             }
 
@@ -345,6 +400,7 @@ Item {
                 color: root.theme ? root.theme.border : "#444"
                 opacity: 0.5
             }
+
         }
     }
 
@@ -380,6 +436,174 @@ Item {
 
         Behavior on width {
             NumberAnimation { duration: 220; easing.type: Easing.OutCubic }
+        }
+    }
+
+    // ── Expanded-day popup ("+N more") ──────────────────────────────────
+    // Click-catcher: dismisses the expansion on any click outside the popup.
+    MouseArea {
+        anchors.fill: parent
+        visible: root.expandedDateKey !== ""
+        z: 90
+        onClicked: root.expandedDateKey = ""
+    }
+
+    // The popup itself — wider than the source cell, clamped to the grid,
+    // grows down (or up near the bottom edge), with a drop shadow. Sits above
+    // the catcher so clicks inside it don't dismiss.
+    Item {
+        id: dayPopup
+        visible: root.expandedDateKey !== ""
+        z: 91
+
+        readonly property int _rowH: 18
+        readonly property int _headH: 24
+        readonly property int _pad: 8
+        readonly property int _needed: _headH + root._expandedEvents.length * _rowH + _pad
+        readonly property real _below: (grid.y + grid.height) - root._exY
+        readonly property real _above: (root._exY + root._exH) - grid.y
+        readonly property bool _down: _needed <= _below || _below >= _above
+        readonly property real _w: Math.min(grid.width, Math.max(root._exW * 1.7, root._exW + 90))
+
+        width: _w
+        height: Math.min(_needed, Math.max(root._exH, _down ? _below : _above))
+        x: Math.max(grid.x, Math.min(root._exX + root._exW / 2 - _w / 2, grid.x + grid.width - _w))
+        y: _down ? root._exY : (root._exY + root._exH - height)
+
+        Rectangle {
+            id: popupBg
+            anchors.fill: parent
+            radius: root.theme.radius
+            color: root.theme ? root.theme.bg : "#ffffff"
+            border.width: 1
+            border.color: root.theme ? root.theme.border : "#bcc0cc"
+            layer.enabled: true
+            layer.effect: MultiEffect {
+                shadowEnabled: true
+                shadowColor: "#000000"
+                shadowOpacity: 0.28
+                shadowBlur: 1.0
+                shadowVerticalOffset: 4
+                shadowHorizontalOffset: 0
+            }
+        }
+
+        Item {
+            id: popHeader
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            height: dayPopup._headH
+
+            Text {
+                anchors.left: parent.left
+                anchors.leftMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                text: root._expandedDay > 0 ? root._expandedDay : ""
+                color: root.theme ? root.theme.fg : "#000"
+                font.family: root.fontFamily
+                font.pixelSize: 13
+                font.bold: true
+            }
+
+            MouseArea {
+                anchors.right: parent.right
+                anchors.rightMargin: 4
+                anchors.verticalCenter: parent.verticalCenter
+                width: 20
+                height: 20
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.expandedDateKey = ""
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "×"
+                    color: root.theme ? root.theme.subFg : "#888"
+                    font.family: root.fontFamily
+                    font.pixelSize: 16
+                }
+            }
+        }
+
+        ListView {
+            id: popList
+            anchors.top: popHeader.bottom
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.leftMargin: 6
+            anchors.rightMargin: 6
+            anchors.bottomMargin: 6
+            clip: true
+            spacing: 2
+            boundsBehavior: Flickable.StopAtBounds
+            model: root._expandedEvents
+
+            delegate: Rectangle {
+                id: pchip
+                required property var modelData
+                width: ListView.view.width
+                height: 16
+                radius: root.theme.radius
+                clip: true
+                color: root._chipBg(pchipArea.containsMouse)
+
+                MouseArea {
+                    id: pchipArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        if (root.provider)
+                            root.provider.selectEvent(pchip.modelData);
+                        root.expandedDateKey = "";
+                    }
+                }
+
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    width: 2
+                    color: {
+                        const c = pchip.modelData.color;
+                        if (c && c.length > 0) return c;
+                        return root.theme ? root.theme.accent : "#1e66f5";
+                    }
+                }
+
+                Text {
+                    id: pTime
+                    anchors.right: parent.right
+                    anchors.rightMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: !pchip.modelData.allDay && text.length > 0
+                    text: {
+                        const m = pchip.modelData;
+                        if (m.allDay) return "";
+                        const d = new Date(m.start);
+                        if (isNaN(d.getTime())) return "";
+                        return Qt.formatTime(d, "HH:mm");
+                    }
+                    color: root.theme ? root.theme.fg : "#000"
+                    font.family: root.fontFamily
+                    font.pixelSize: 10
+                    font.bold: true
+                }
+
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 8
+                    anchors.right: pTime.visible ? pTime.left : parent.right
+                    anchors.rightMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: pchip.modelData.summary || "(no title)"
+                    color: root.theme ? root.theme.fg : "#000"
+                    font.family: root.fontFamily
+                    font.pixelSize: 10
+                    elide: Text.ElideRight
+                }
+            }
         }
     }
 }

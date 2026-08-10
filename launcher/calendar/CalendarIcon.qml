@@ -35,7 +35,7 @@ Item {
     Rectangle {
         anchors.fill: parent
         anchors.margins: 2
-        radius: 6
+        radius: root.theme.radius
         clip: true
         color: root.theme ? Qt.rgba(root.theme.bg.r, root.theme.bg.g, root.theme.bg.b, 0.92) : "#ffffff"
         border.color: root.theme ? root.theme.border : "#444"

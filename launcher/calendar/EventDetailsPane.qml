@@ -105,7 +105,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 width: 22
                 height: 22
-                radius: 4
+                radius: pane.theme.radius
                 color: closeArea.containsMouse && pane.theme
                     ? Qt.rgba(pane.theme.fg.r, pane.theme.fg.g, pane.theme.fg.b, 0.10)
                     : "transparent"

@@ -39,7 +39,17 @@ Provider {
     onDisplayedMonthChanged: Qt.callLater(_refreshEvents)
     onDisplayedYearChanged:  Qt.callLater(_refreshEvents)
 
+    // Re-fetch when the launcher is (re)opened so events synced into the
+    // vdirsyncer cache while QS keeps running appear without a reload.
+    // Without this, events were only loaded at startup and on month change, so
+    // a long-running session showed a stale snapshot until restart. Throttled
+    // so repeated opens don't respawn Python needlessly.
+    property double _lastFetchMs: 0
+    onLauncherOpenChanged: if (launcherOpen && (Date.now() - _lastFetchMs) > 60000)
+        _refreshEvents()
+
     function _refreshEvents() {
+        _lastFetchMs = Date.now();
         // Pad by a week on either side so adjacent-month rows are populated.
         const start = new Date(displayedYear, displayedMonth, 1);
         start.setDate(start.getDate() - 7);

@@ -44,7 +44,7 @@ Item {
             id: addBtn
             width: 32
             height: 32
-            radius: 6
+            radius: root.theme.radius
             anchors.right: parent.right
             anchors.rightMargin: 14
             anchors.verticalCenter: parent.verticalCenter
@@ -103,7 +103,7 @@ Item {
             width: ListView.view.width - 12
             x: 6
             height: Math.max(52, content.implicitHeight + 16)
-            radius: 6
+            radius: root.theme.radius
             color: (rowMa.containsMouse || nameLinks.containsMouse) && root.theme ? Qt.rgba(root.theme.accent.r, root.theme.accent.g, root.theme.accent.b, 0.08) : "transparent"
 
             readonly property bool _done: !!row.modelData.completed_on
@@ -141,7 +141,7 @@ Item {
                 id: check
                 width: 18
                 height: 18
-                radius: 4
+                radius: root.theme.radius
                 anchors.left: parent.left
                 anchors.leftMargin: 12
                 anchors.verticalCenter: parent.verticalCenter

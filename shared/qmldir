@@ -1,3 +1,6 @@
 singleton LaunchTrigger 1.0 LaunchTrigger.qml
 singleton NotificationManager 1.0 NotificationManager.qml
+singleton Config 1.0 Config.qml
 Dropdown 1.0 Dropdown.qml
+Select 1.0 Select.qml
+CalendarReminders 1.0 CalendarReminders.qml

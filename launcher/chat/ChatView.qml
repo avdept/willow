@@ -199,7 +199,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 height: 20
                 width: stopText.implicitWidth + 14
-                radius: 4
+                radius: root.theme.radius
                 color: stopMa.containsMouse && root.theme ? Qt.rgba(root.theme.danger.r, root.theme.danger.g, root.theme.danger.b, 0.14) : "transparent"
                 border.color: root.theme ? root.theme.danger : "#d20f39"
                 border.width: 1
@@ -299,7 +299,7 @@ Item {
                     anchors.leftMargin: 14
                     width: Math.min(msgList.width - 28, streamText.contentWidth + 18)
                     height: streamText.contentHeight + 18
-                    radius: 8
+                    radius: root.theme.radius
                     color: root.theme ? Qt.rgba(root.theme.fg.r, root.theme.fg.g, root.theme.fg.b, 0.06) : "#eee"
 
                     Text {
@@ -336,7 +336,7 @@ Item {
                     id: bubble
                     width: Math.min(msgRow._maxBubbleWidth, msgText.contentWidth + 18)
                     height: msgText.contentHeight + 18
-                    radius: 8
+                    radius: root.theme.radius
                     anchors.left: msgRow._isUser ? undefined : parent.left
                     anchors.right: msgRow._isUser ? parent.right : undefined
                     anchors.leftMargin: 14

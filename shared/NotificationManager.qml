@@ -20,11 +20,13 @@ NotificationServer {
 
     property var _timestamps: ({})
     property int _revision: 0
-    readonly property int count: server.trackedNotifications.values.length
-    readonly property var notifications: {
-        server.count;
-        server._revision;
-        return server.newestFirst();
+    // Drawer-visible count (transient notifications are toast-only).
+    readonly property int count: {
+        const v = server.trackedNotifications.values;
+        let n = 0;
+        for (let i = 0; i < v.length; i++)
+            if (v[i] && !v[i].transient) n++;
+        return n;
     }
     readonly property var groups: {
         server.count;
@@ -33,17 +35,33 @@ NotificationServer {
     }
 
     onNotification: function (notif) {
-        // If the notif is already tracked, it's a replace/update or a reload
-        // re-emit (keepOnReload keeps tracked=true across shell reloads). Only
-        // toast on genuinely fresh arrivals — the drawer card auto-updates via
-        // bindings on the same notif object.
-        const wasAlreadyTracked = notif.tracked;
         notif.tracked = true;
-        if (!wasAlreadyTracked)
-            _timestamps[notif.id] = Date.now();
         _revision++;
-        if (!wasAlreadyTracked)
-            newNotification(notif);
+        // Notifications carried over by keepOnReload re-fire this signal on
+        // reload — keep them in the drawer but don't re-toast or reset age.
+        if (notif.lastGeneration) {
+            console.warn("[notif] lastGeneration, no toast:", notif.id, notif.appName);
+            if (_timestamps[notif.id] === undefined)
+                _timestamps[notif.id] = Date.now();
+            return;
+        }
+        const firstSeen = _timestamps[notif.id] === undefined;
+        // Genuinely received (new OR a replace/update): stamp as latest.
+        _timestamps[notif.id] = Date.now();
+        // Don't spam toasts for progress updaters — only the first emit of a
+        // notification carrying a `value` hint pops; later ticks update the
+        // drawer silently.
+        if (!firstSeen && progressOf(notif) >= 0) {
+            console.warn("[notif] progress update, no toast:", notif.id, notif.appName);
+            return;
+        }
+        console.warn("[notif] emit newNotification:", notif.id, notif.appName,
+                     "transient=" + notif.transient, "expire=" + notif.expireTimeout);
+        newNotification(notif);
+    }
+
+    function isTransient(notif) {
+        return !!(notif && notif.transient);
     }
 
     function timestampOf(notif) {
@@ -63,9 +81,7 @@ NotificationServer {
         return new Date(ts).toLocaleDateString(Qt.locale(), "d MMM");
     }
 
-    // Normalize a Notification.appIcon / Notification.image value into a
-    // URL IconImage can render. Raw icon names like "slack" otherwise get
-    // resolved against IconImage's QRC base and 404.
+    // Turn an icon name or path into a URL IconImage can load.
     function iconUrl(raw) {
         if (!raw) return "";
         if (raw.indexOf("/") >= 0 || raw.indexOf(":") >= 0) return raw;
@@ -104,11 +120,15 @@ NotificationServer {
         return Math.max(0, Math.min(100, n));
     }
 
-    function activateDefault(notif) {
-        const a = defaultActionOf(notif);
-        if (a)
-            return invokeAction(notif, a);
-        return false;
+    // Toast lifetime in ms; 0 = sticky (never expire). expireTimeout is in
+    // seconds (-1 = default, 0 = never, >0 = that many); Critical stays sticky.
+    function toastDurationOf(notif, defaultMs) {
+        if (!notif) return defaultMs;
+        if (notif.urgency === NotificationUrgency.Critical) return 0;
+        const t = notif.expireTimeout;
+        if (t === 0) return 0;
+        if (t > 0) return Math.round(t * 1000);
+        return defaultMs;
     }
 
     function invokeAction(notif, action) {
@@ -117,15 +137,8 @@ NotificationServer {
         return true;
     }
 
-    function newestFirst() {
-        return server.trackedNotifications.values.slice().reverse();
-    }
-
-    // Try to find a human-friendly app name. Some apps send their dotted
-    // identifier as `app_name`, which is what shows up in the UI as
-    // "com.foo.bar". Resolve via the desktop entry list (any candidate
-    // among the hint, app_name, or group key may match an installed
-    // .desktop file) and fall back to a prettified last segment.
+    // Human-friendly app name: match hint/app_name/key against installed
+    // .desktop entries, else prettify the last dotted segment.
     function resolveAppName(notif, key) {
         const apps = DesktopEntries.applications.values;
         const hint = notif && notif.hints && notif.hints["desktop-entry"] !== undefined
@@ -167,6 +180,7 @@ NotificationServer {
         const map = {};
         for (let i = 0; i < all.length; i++) {
             const n = all[i];
+            if (isTransient(n)) continue;   // toast-only, never in the drawer
             const k = groupKey(n);
             if (!map[k]) {
                 map[k] = {

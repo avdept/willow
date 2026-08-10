@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import Quickshell
 import Quickshell.Widgets
 import "shared"
 
@@ -19,6 +20,11 @@ Column {
     property color imageBg: theme.border
 
     signal actionInvoked(var action)
+    signal joinClicked()
+
+    // Lets the action row run full width by reclaiming the content's right
+    // margin (which only exists to keep the title clear of the close button).
+    property int actionsExtend: 0
 
     spacing: 6
 
@@ -26,6 +32,14 @@ Column {
     readonly property string appIcon: notif ? (notif.appIcon || "") : ""
     readonly property string thumbSrc: NotificationManager.iconUrl(preferBodyImage ? (bodyImage || appIcon) : (bodyImage || ""))
     readonly property int progress: NotificationManager.progressOf(notif)
+
+    // Nerd-font glyph via the x-glyph hint, used instead of a themed icon.
+    readonly property string glyph: (notif && notif.hints && notif.hints["x-glyph"] !== undefined)
+        ? String(notif.hints["x-glyph"]) : ""
+
+    // Meeting link via the x-join-url hint → rendered as a "Join" button.
+    readonly property string joinUrl: (notif && notif.hints && notif.hints["x-join-url"] !== undefined)
+        ? String(notif.hints["x-join-url"]) : ""
 
     Row {
         width: Math.max(1, parent.width)
@@ -35,15 +49,27 @@ Column {
             id: imageBox
             width: content.imageSize
             height: content.imageSize
-            radius: 4
-            color: content.imageBg
+            radius: content.theme.radius
+            // No background plate behind a bare glyph — only behind images.
+            color: content.thumbSrc.length > 0 ? content.imageBg : "transparent"
             clip: true
-            visible: content.thumbSrc.length > 0
+            visible: content.thumbSrc.length > 0 || content.glyph.length > 0
 
             IconImage {
                 anchors.fill: parent
                 source: content.thumbSrc
                 smooth: true
+                visible: content.thumbSrc.length > 0
+            }
+
+            Text {
+                anchors.centerIn: parent
+                visible: content.thumbSrc.length === 0 && content.glyph.length > 0
+                text: content.glyph
+                // fg tracks the theme: dark on a light theme, light on a dark one.
+                color: content.theme.fg
+                font.family: content.fontFamily
+                font.pixelSize: content.imageSize
             }
         }
 
@@ -86,39 +112,53 @@ Column {
         visible: content.progress >= 0
     }
 
+    component ActionButton : MouseArea {
+        property string label: ""
+        Layout.fillWidth: true
+        Layout.preferredHeight: content.actionHeight
+        cursorShape: Qt.PointingHandCursor
+
+        Rectangle {
+            anchors.fill: parent
+            radius: content.theme.radius
+            color: content.theme.accent
+        }
+        Text {
+            anchors.centerIn: parent
+            width: Math.max(1, parent.width - 10)
+            text: parent.label
+            color: content.theme.bg
+            font.family: content.fontFamily
+            font.pixelSize: 10
+            font.bold: true
+            horizontalAlignment: Text.AlignHCenter
+            elide: Text.ElideRight
+        }
+    }
+
     RowLayout {
-        width: Math.max(1, parent.width)
+        width: Math.max(1, parent.width + content.actionsExtend)
         spacing: 6
         readonly property var buttonActions: NotificationManager.nonDefaultActions(content.notif)
-        visible: buttonActions.length > 0
+        visible: buttonActions.length > 0 || content.joinUrl.length > 0
+
+        // Opens the x-join-url directly — no DBus round-trip, so it works after
+        // the sender (notify-send) has exited.
+        ActionButton {
+            visible: content.joinUrl.length > 0
+            label: "Join"
+            onClicked: {
+                Quickshell.execDetached(["xdg-open", content.joinUrl]);
+                content.joinClicked();
+            }
+        }
 
         Repeater {
             model: parent.buttonActions
-
-            delegate: MouseArea {
+            delegate: ActionButton {
                 required property var modelData
-                Layout.fillWidth: true
-                Layout.preferredHeight: content.actionHeight
-                cursorShape: Qt.PointingHandCursor
+                label: NotificationManager.actionText(modelData)
                 onClicked: content.actionInvoked(modelData)
-
-                Rectangle {
-                    anchors.fill: parent
-                    radius: 3
-                    color: content.theme.accent
-                }
-
-                Text {
-                    anchors.centerIn: parent
-                    width: Math.max(1, parent.width - 10)
-                    text: NotificationManager.actionText(parent.modelData)
-                    color: content.theme.bg
-                    font.family: content.fontFamily
-                    font.pixelSize: 10
-                    font.bold: true
-                    horizontalAlignment: Text.AlignHCenter
-                    elide: Text.ElideRight
-                }
             }
         }
     }

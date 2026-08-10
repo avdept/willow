@@ -1,17 +1,6 @@
-// On-screen display, replaces swayosd. A transient bottom-center pill that
-// shows volume, mic mute, screen brightness, and caps/num lock state, then
-// auto-hides.
-//
-// How each indicator is triggered:
-//   • Volume / mute   — reactive on Pipewire.defaultAudioSink (so it also
-//                       fires when volume is changed from the bar, not just
-//                       the media keys).
-//   • Mic mute        — reactive on Pipewire.defaultAudioSource mute state.
-//   • Brightness      — IPC `qs ipc call osd brightness`, fired by the
-//                       rerouted XF86MonBrightness* keybindings. No-ops on
-//                       machines without a /sys/class/backlight device.
-//   • Caps / Num lock — polled from /sys/class/leds/*::{caps,num}lock since
-//                       there is no compositor signal for lock state.
+// On-screen display (replaces swayosd): a transient bottom-center pill for
+// volume, mic mute, brightness, and caps/num lock. Volume/mic are reactive on
+// Pipewire; brightness is IPC-triggered; lock state is polled from sysfs LEDs.
 
 import QtQuick
 import QtQuick.Effects
@@ -27,16 +16,15 @@ PanelWindow {
     required property var theme
     required property string fontFamily
 
-    property int hideMs: 1500
+    property int hideMs: 5000
 
     // Extra space the window reserves around the pill so the drop shadow has
     // room to render without being clipped at the surface edge.
     property int shadowMargin: 24
     property int pillHeight: 48
 
-    // The pill grows to fit its content but never exceeds half the screen
-    // width. Bar indicators (volume/brightness) use a fixed comfortable width;
-    // text indicators (media/mic/lock) size to the label and elide past the cap.
+    // Bar indicators use a fixed width; text indicators size to their label,
+    // both capped at half the screen width.
     property int minPillWidth: 180
     property int barModeWidth: 260
     readonly property int maxPillWidth: Math.round((screen ? screen.width : 1920) * 0.5)
@@ -47,16 +35,13 @@ PanelWindow {
         return Math.max(minPillWidth, Math.min(maxPillWidth, content));
     }
 
-    // Keep the Pipewire sink/source bound so their audio sub-objects (and the
-    // volume/muted properties we watch) stay populated.
+    // Keep the sink/source bound so their audio sub-objects stay populated.
     PwObjectTracker {
         objects: [Pipewire.defaultAudioSink, Pipewire.defaultAudioSource]
     }
 
-    // ── Window placement: bottom-center overlay ─────────────────────────────
-    // Anchoring only the bottom edge lets the layer-shell center us
-    // horizontally. The window is sized to the pill plus headroom for the
-    // slide-up animation.
+    // Bottom-center overlay; anchoring only the bottom edge lets layer-shell
+    // center it horizontally.
     WlrLayershell.layer: WlrLayer.Overlay
     WlrLayershell.namespace: "quickshell-osd"
     WlrLayershell.keyboardFocus: WlrKeyboardFocus.None
@@ -64,22 +49,23 @@ PanelWindow {
     margins.bottom: 90 - shadowMargin
     exclusiveZone: 0
     color: "transparent"
-    // Pill + shadow headroom on every side (plus a little extra at the bottom
-    // for the slide-up travel).
     implicitWidth: pillWidth + shadowMargin * 2
     implicitHeight: pillHeight + shadowMargin * 2
 
-    // Click-through: the pill is purely informational.
-    mask: Region {}
+    // Only the pill and close button take input; the shadow headroom is
+    // click-through.
+    mask: Region {
+        Region { item: pill }
+        Region { item: closeBtn }
+    }
 
-    // ── Display state (set by the _show* helpers) ───────────────────────────
     property string _icon: ""
     property string _label: ""
     property real _level: 0          // 0..1, drives the bar
     property bool _showBar: true     // false for mic / lock toggles
     property bool _danger: false     // muted / off → bar+icon use the danger color
+    property string _mode: ""        // "volume" enables drag-to-set on the bar
 
-    // ── Visibility + slide/fade animation ───────────────────────────────────
     property bool _open: false
     property real _vis: _open ? 1 : 0
     Behavior on _vis {
@@ -93,9 +79,7 @@ PanelWindow {
         onTriggered: osd._open = false
     }
 
-    // Suppress the burst of initial property-change signals fired while
-    // Pipewire/the LED pollers settle on startup, so we don't flash an OSD on
-    // launch.
+    // Gate startup: suppress the settling burst so we don't flash on launch.
     property bool _ready: false
     Timer {
         id: readyTimer
@@ -104,21 +88,21 @@ PanelWindow {
         onTriggered: osd._ready = true
     }
 
-    function _show(icon, label, level, showBar, danger) {
+    function _show(icon, label, level, showBar, danger, mode) {
         _icon = icon;
         _label = label;
         _level = level;
         _showBar = showBar;
         _danger = danger;
+        _mode = mode || "";
         _open = true;
-        hideTimer.restart();
+        // Pin open while hovered (reading / dragging the slider).
+        if (hover.hovered) hideTimer.stop();
+        else hideTimer.restart();
     }
 
-    // ── Plugin contract ─────────────────────────────────────────────────────
-    // Self-contained source watchers under plugins/ call show(...) when their
-    // value changes, gated on `ready` so they don't flash an OSD during the
-    // startup settle. (The volume/mic/brightness/lock sources are still wired
-    // inline below; new indicators should be added as plugins.)
+    // Plugin contract: plugins under plugins/ call show(...) on change, gated
+    // on `ready`. New indicators should be added as plugins.
     function show(icon, label, level, showBar, danger) {
         _show(icon, label, level, showBar, danger);
     }
@@ -144,7 +128,7 @@ PanelWindow {
         const muted = a.muted;
         const icon = (muted || v <= 0.001) ? "󰝟"
             : (v < 0.34 ? "󰕿" : (v < 0.67 ? "󰖀" : "󰕾"));
-        osd._show(icon, Math.round(v * 100) + "%", Math.min(1, v), true, muted);
+        osd._show(icon, Math.round(v * 100) + "%", Math.min(1, v), true, muted, "volume");
     }
 
     // ── Mic mute (reactive) ─────────────────────────────────────────────────
@@ -238,8 +222,8 @@ PanelWindow {
         anchors.bottomMargin: osd.shadowMargin
         width: osd.pillWidth
         height: osd.pillHeight
-        radius: 12
-        color: Qt.rgba(osd.theme.bg.r, osd.theme.bg.g, osd.theme.bg.b, 0.95)
+        radius: osd.theme.radius
+        color: Qt.rgba(osd.theme.bg.r, osd.theme.bg.g, osd.theme.bg.b, osd.theme.surfaceOpacity)
         border.color: osd.theme.border
         border.width: 1
 
@@ -257,6 +241,15 @@ PanelWindow {
         }
 
         readonly property color _fillColor: osd._danger ? osd.theme.danger : osd.theme.accent
+
+        // Hovering pins the OSD open; leaving restarts the full auto-hide timer.
+        HoverHandler {
+            id: hover
+            onHoveredChanged: {
+                if (hovered) hideTimer.stop();
+                else if (osd._open) hideTimer.restart();
+            }
+        }
 
         Text {
             id: glyph
@@ -294,7 +287,7 @@ PanelWindow {
             anchors.rightMargin: 12
             anchors.verticalCenter: parent.verticalCenter
             height: 6
-            radius: 3
+            radius: osd.theme.radius
             color: osd.theme.border
 
             Rectangle {
@@ -302,10 +295,29 @@ PanelWindow {
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
                 width: parent.width * Math.max(0, Math.min(1, osd._level))
-                radius: 3
+                radius: osd.theme.radius
                 color: pill._fillColor
                 Behavior on width {
                     NumberAnimation { duration: 120; easing.type: Easing.OutQuad }
+                }
+            }
+
+            // Drag (or click) anywhere along the bar to set the volume. Only
+            // active in volume mode — brightness/other bars stay read-only. The
+            // hit area is taller than the 6px track so it's easy to grab.
+            MouseArea {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                height: 24
+                enabled: osd._mode === "volume" && osd._sinkAudio
+                cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                onPressed: (mouse) => _setVolume(mouse.x)
+                onPositionChanged: (mouse) => { if (pressed) _setVolume(mouse.x); }
+
+                function _setVolume(x) {
+                    const r = Math.max(0, Math.min(1, x / width));
+                    if (osd._sinkAudio) osd._sinkAudio.volume = r;
                 }
             }
         }
@@ -326,6 +338,46 @@ PanelWindow {
             font.family: osd.fontFamily
             font.pixelSize: 13
             elide: Text.ElideRight
+        }
+    }
+
+    HoverHandler { id: osdHover }
+
+    Rectangle {
+        id: closeBtn
+        anchors.horizontalCenter: pill.right
+        anchors.verticalCenter: pill.top
+        width: 22
+        height: 22
+        radius: 11
+
+        visible: opacity > 0.001
+        opacity: (osd._open && osdHover.hovered) ? osd._vis : 0
+        Behavior on opacity {
+            NumberAnimation { duration: 150; easing.type: Easing.OutQuad }
+        }
+        color: Qt.rgba(osd.theme.bg.r, osd.theme.bg.g, osd.theme.bg.b, 0.98)
+        border.color: osd.theme.border
+        border.width: 1
+        z: 10
+
+        Text {
+            anchors.centerIn: parent
+            text: "×"
+            color: closeHover.hovered ? osd.theme.fg : osd.theme.subFg
+            font.family: osd.fontFamily
+            font.pixelSize: closeHover.hovered ? 17 : 16
+            font.weight: closeHover.hovered ? Font.Bold : Font.Normal
+            Behavior on font.pixelSize { NumberAnimation { duration: 120 } }
+            Behavior on color { ColorAnimation { duration: 120 } }
+        }
+
+        HoverHandler { id: closeHover }
+        TapHandler {
+            onTapped: {
+                hideTimer.stop();
+                osd._open = false;
+            }
         }
     }
 }

@@ -152,7 +152,7 @@ Item {
 
             Rectangle {
                 anchors.fill: parent
-                radius: 10
+                radius: pane.theme.radius
                 color: {
                     const c = pane._themeColor(pane.detail?.state?.color ?? "");
                     return Qt.rgba(c.r, c.g, c.b, 0.85);
@@ -211,7 +211,7 @@ Item {
             color: Qt.rgba(pane.theme.border.r, pane.theme.border.g, pane.theme.border.b, 0.15)
             border.color: pane.theme.border
             border.width: 1
-            radius: 6
+            radius: pane.theme.radius
             visible: !pane._loading && pane._error.length === 0 && (pane.detail?.body ?? "").length > 0
 
             ScrollView {

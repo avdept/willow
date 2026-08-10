@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "shared"
 
 QtObject {
     id: theme
@@ -17,6 +18,16 @@ QtObject {
     property color info:    "#1e66f5"     // color4 — blue (may match accent)
     property color purple:  "#8839ef"     // color5 — magenta/purple
     property color cyan:    "#04a5e5"     // color6 — cyan
+
+    // Shared corner radius for cards/containers/buttons. Real circles (dots,
+    // avatars: radius = width/2) and capsule shapes keep their own radius.
+    // User-configurable via the Settings window (Config singleton).
+    property int radius: Config.radius
+
+    // Translucency of popout surfaces (launcher, OSD, drawer). Keep above the
+    // Hyprland ignore_alpha threshold (0.5) or blur won't apply. Configurable
+    // via the Settings window.
+    property real surfaceOpacity: Config.surfaceOpacity
 
     // omarchy's `theme set` does an atomic directory swap on
     // `current/theme/` (rm + mv), so an inotify watcher bound to

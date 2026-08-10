@@ -41,9 +41,21 @@ Item {
         hoverEnabled: true
         cursorShape: Qt.ArrowCursor
         onClicked: row.activated(row.index)
-        // Hover wins over keyboard selection — first entry into a row claims it.
-        onContainsMouseChanged: if (containsMouse) row.hovered(row.index)
-        onPositionChanged:      if (!row.isSelected) row.hovered(row.index)
+
+        // A row can become "entered" with no real movement: the popup mapping
+        // under a stationary cursor (Wayland delivers an enter + one motion event
+        // at the cursor's spot on map), or a wheel-scroll sliding the row under
+        // it. Both would otherwise steal the selection. So we swallow the first
+        // positionChanged after each entry (the synthetic one) and only let
+        // genuine movement after that claim the row. Defaults to disarmed so the
+        // very first event after the delegate is created under the cursor is
+        // ignored even if no enter fires.
+        property bool _hoverArmed: false
+        onEntered: _hoverArmed = false
+        onPositionChanged: {
+            if (!_hoverArmed) { _hoverArmed = true; return; }
+            if (!row.isSelected) row.hovered(row.index);
+        }
     }
 
     Row {

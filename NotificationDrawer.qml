@@ -119,8 +119,8 @@ PanelWindow {
             anchors.leftMargin: 8
             anchors.rightMargin: 8
             height: 40
-            radius: 0
-            color: Qt.rgba(drawer.theme.bg.r, drawer.theme.bg.g, drawer.theme.bg.b, 0.78)
+            radius: drawer.theme.radius
+            color: Qt.rgba(drawer.theme.bg.r, drawer.theme.bg.g, drawer.theme.bg.b, drawer.theme.surfaceOpacity)
             border.color: drawer.theme.border
             border.width: 1
 
@@ -159,7 +159,7 @@ PanelWindow {
 
                 Rectangle {
                     anchors.fill: parent
-                    radius: 4
+                    radius: drawer.theme.radius
                     color: drawer.theme.accent
                 }
 
@@ -212,6 +212,11 @@ PanelWindow {
 
                         Item {
                             id: stackArea
+                            // Match the header's 8px inset so cards line up with
+                            // the title bar. (The card's drop shadow is mostly
+                            // vertical and shows in the 12px gap between cards;
+                            // the scroll clips the slight side blur, which is
+                            // not noticeable.)
                             width: groupWrapper.width - 16
                             anchors.horizontalCenter: groupWrapper.horizontalCenter
 

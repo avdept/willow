@@ -3,6 +3,7 @@
 // the per-context behavior via the boolean properties below.
 
 import QtQuick
+import QtQuick.Effects
 import Quickshell.Widgets
 import Quickshell.Services.Notifications
 import "shared"
@@ -38,11 +39,12 @@ Rectangle {
     readonly property var defaultAction: NotificationManager.defaultActionOf(card.notif)
 
     // ── Visual ──────────────────────────────────────────────────────────
-    radius: 0
-    color: Qt.rgba(card.theme.bg.r, card.theme.bg.g, card.theme.bg.b, card.inGroup ? 0.9 : 0.78)
+    radius: card.theme.radius
+    color: Qt.rgba(card.theme.bg.r, card.theme.bg.g, card.theme.bg.b, card.inGroup ? 0.9 : 0.8)
     border.color: card.theme.border
     border.width: 1
-    clip: true
+    antialiasing: true
+    clip: true   // clip content to the animating height (height grows 0→natural)
 
     // ── Animation state ─────────────────────────────────────────────────
     readonly property real _naturalHeight: cardCol.implicitHeight + cardCol.anchors.topMargin + cardCol.anchors.bottomMargin
@@ -188,6 +190,7 @@ Rectangle {
         anchors.rightMargin: 6
         width: 18
         height: 18
+        hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
         onClicked: {
             if (card.dismissesGroup) {
@@ -200,13 +203,22 @@ Rectangle {
         Text {
             anchors.centerIn: parent
             text: "×"
-            color: card.theme.subFg
+            color: closeBtn.containsMouse ? card.theme.fg : card.theme.subFg
             font.family: card.fontFamily
-            font.pixelSize: 16
+            font.pixelSize: closeBtn.containsMouse ? 17 : 16
+            font.weight: closeBtn.containsMouse ? Font.Bold : Font.Normal
+            Behavior on font.pixelSize { NumberAnimation { duration: 120 } }
+            Behavior on color { ColorAnimation { duration: 120 } }
         }
     }
 
-    // ── Content column ──────────────────────────────────────────────────
+    // Content lives in a clip container so the height animation hides overflow
+    // without clipping (and thickening) the bordered card itself.
+    Item {
+        id: contentClip
+        anchors.fill: parent
+        clip: true
+
     Column {
         id: cardCol
         anchors.left: parent.left
@@ -295,6 +307,11 @@ Rectangle {
             actionHeight: card.showStripe ? 22 : 24
             preferBodyImage: true
             imageBg: card.showStripe ? "transparent" : card.theme.border
+            // Let action buttons reclaim the right margin (kept for title/×
+            // clearance) so they run full width — left/right padding stays even.
+            actionsExtend: cardCol.anchors.rightMargin - cardCol.anchors.leftMargin
+            // Hide the toast/card once its meeting link is opened.
+            onJoinClicked: if (typeof card._dismiss === "function") card._dismiss()
             onActionInvoked: function (action) {
                 // Ignore the synthetic click emitted while the card is torn
                 // down on reload (see the toast onClicked guard).
@@ -305,5 +322,6 @@ Rectangle {
                     card._dismiss();
             }
         }
+    }
     }
 }

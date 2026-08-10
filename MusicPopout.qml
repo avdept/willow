@@ -70,7 +70,7 @@ Popout {
             id: artBox
             width: 60
             height: 60
-            radius: 6
+            radius: musicPopout.cornerRadius
             color: musicPopout.borderColor
             clip: true
 

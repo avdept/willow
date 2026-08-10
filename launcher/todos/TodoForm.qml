@@ -413,7 +413,7 @@ Item {
             id: deleteBtn
             width: 72
             height: 30
-            radius: 4
+            radius: root.theme.radius
             anchors.left: parent.left
             anchors.leftMargin: 14
             anchors.verticalCenter: parent.verticalCenter
@@ -449,7 +449,7 @@ Item {
             Rectangle {
                 width: 72
                 height: 30
-                radius: 4
+                radius: root.theme.radius
                 color: cancelMa.containsMouse && root.theme ? Qt.rgba(root.theme.fg.r, root.theme.fg.g, root.theme.fg.b, 0.08) : "transparent"
                 border.color: root.theme ? root.theme.border : "#444"
                 border.width: 1
@@ -474,7 +474,7 @@ Item {
             Rectangle {
                 width: 80
                 height: 30
-                radius: 4
+                radius: root.theme.radius
                 readonly property bool _enabled: root.fName.trim().length > 0
                 color: !_enabled ? Qt.rgba(0, 0, 0, 0) : (saveMa.containsMouse && root.theme ? Qt.darker(root.theme.accent, 1.15) : (root.theme ? root.theme.accent : "#1e66f5"))
                 border.color: root.theme ? root.theme.accent : "#1e66f5"

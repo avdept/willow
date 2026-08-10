@@ -32,7 +32,7 @@ PanelWindow {
     // Hard caps as a fraction of screen size; provider requests are clamped.
     readonly property real maxWidthRatio:  0.70
     readonly property real maxHeightRatio: 0.80
-    readonly property real cardAlpha: 0.95
+    readonly property real cardAlpha: theme.surfaceOpacity
 
     property int cardWidth: defaultCardWidth
     property int cardHeight: defaultCardHeight
@@ -56,6 +56,10 @@ PanelWindow {
     property var leftModel: []
     property var rightModel: []
     readonly property var activeModel: mode === "provider" ? rightModel : leftModel
+
+    // Emitted when the footer's settings entry is clicked; shell.qml opens the
+    // standalone settings window in response.
+    signal settingsRequested()
 
     anchors { top: true; left: true; right: true; bottom: true }
     exclusionMode: ExclusionMode.Ignore
@@ -536,6 +540,7 @@ PanelWindow {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: parent.top
         anchors.topMargin: Math.max(64, parent.height * 0.18)
+        radius: launcher.theme.radius
         color: Qt.rgba(launcher.theme.bg.r, launcher.theme.bg.g, launcher.theme.bg.b, launcher.cardAlpha)
         border.color: launcher.theme.border
         border.width: 1
@@ -629,7 +634,7 @@ PanelWindow {
                             required property var modelData
                             width: 32
                             height: 32
-                            radius: 6
+                            radius: launcher.theme.radius
                             color: actMa.containsMouse
                                 ? Qt.rgba(launcher.theme.fg.r, launcher.theme.fg.g, launcher.theme.fg.b, 0.10)
                                 : "transparent"
@@ -985,6 +990,30 @@ PanelWindow {
                     HintText { text: "↑↓ navigate" }
                     HintText { text: launcher.mode === "menu" ? "↵ open"    : "↵ launch" }
                     HintText { text: launcher.mode === "menu" ? "esc close" : "esc back"  }
+
+                    // Clickable settings entry — opens the standalone settings
+                    // window (and closes the launcher).
+                    Item {
+                        width: settingsHint.implicitWidth
+                        height: settingsHint.implicitHeight
+
+                        HintText {
+                            id: settingsHint
+                            text: "󰒓 settings"
+                            color: settingsMa.containsMouse ? launcher.theme.accent : launcher.theme.subFg
+                        }
+
+                        MouseArea {
+                            id: settingsMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                launcher.hide();
+                                launcher.settingsRequested();
+                            }
+                        }
+                    }
                 }
 
                 Loader {

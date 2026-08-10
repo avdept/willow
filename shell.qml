@@ -26,7 +26,8 @@ Scope {
     readonly property color cBorder: theme.border
     readonly property color cDanger: theme.danger
     readonly property color cWarn:   theme.warn
-    readonly property string fontFamily: "JetBrainsMono Nerd Font Mono"
+    // Font is user-configurable via the Settings window (Config singleton).
+    readonly property string fontFamily: Config.fontFamily
 
     PwObjectTracker {
         objects: [Pipewire.defaultAudioSink]
@@ -38,6 +39,7 @@ Scope {
         id: launcher
         theme: theme
         fontFamily: root.fontFamily
+        onSettingsRequested: settingsWindow.open = true
     }
 
     // Notification drawer (right-side panel) + transient toasts.
@@ -55,6 +57,7 @@ Scope {
         theme: theme
         fontFamily: root.fontFamily
         drawerOpen: notificationDrawer.open
+        toastDurationMs: Config.toastDurationMs
     }
 
     // Volume / mic / brightness / lock OSD (bottom-center). Replaces swayosd.
@@ -63,6 +66,23 @@ Scope {
         id: osd
         theme: theme
         fontFamily: root.fontFamily
+        hideMs: Config.osdHideMs
+    }
+
+    // Fires a desktop notification ahead of timed calendar events (same
+    // vdirsyncer source as the launcher calendar). Sticky by default, so an
+    // upcoming-event reminder stays on screen until dismissed. Tune lead times
+    // here, e.g. leadsMin: [60, 10, 0].
+    CalendarReminders {
+        id: calendarReminders
+        leadsMin: Config.reminderLeadsMin
+    }
+
+    // Standalone settings window (real floating window, not a layer-shell
+    // popup). Toggle via `qs ipc call settings toggle` or the bar gear icon.
+    SettingsWindow {
+        id: settingsWindow
+        theme: theme
     }
 
     Variants {
@@ -86,6 +106,7 @@ Scope {
                 id: musicPopout
                 bar: bar
                 anchorItem: mprisArea
+                cornerRadius: theme.radius
                 bgColor: root.cBg
                 borderColor: root.cBorder
                 fgColor: root.cFg

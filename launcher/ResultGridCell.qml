@@ -31,7 +31,7 @@ Item {
         id: card
         anchors.fill: parent
         anchors.margins: 6
-        radius: 8
+        radius: cell.theme.radius
         color: cell.isSelected
             ? Qt.rgba(cell.theme.accent.r, cell.theme.accent.g, cell.theme.accent.b, 0.20)
             : Qt.rgba(cell.theme.border.r, cell.theme.border.g, cell.theme.border.b, 0.18)
@@ -122,7 +122,14 @@ Item {
         hoverEnabled: true
         cursorShape: Qt.ArrowCursor
         onClicked: cell.activated(cell.index)
-        onContainsMouseChanged: if (containsMouse) cell.hovered(cell.index)
-        onPositionChanged:      if (!cell.isSelected) cell.hovered(cell.index)
+        // Swallow the synthetic first move after each entry (popup mapping under
+        // the cursor, or scroll sliding the cell under it); only genuine pointer
+        // movement after that claims the cell. See the note in ResultDelegate.qml.
+        property bool _hoverArmed: false
+        onEntered: _hoverArmed = false
+        onPositionChanged: {
+            if (!_hoverArmed) { _hoverArmed = true; return; }
+            if (!cell.isSelected) cell.hovered(cell.index);
+        }
     }
 }
