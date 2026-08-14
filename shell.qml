@@ -26,11 +26,25 @@ Scope {
     readonly property color cBorder: theme.border
     readonly property color cDanger: theme.danger
     readonly property color cWarn:   theme.warn
+    readonly property color cSuccess: theme.success
     // Font is user-configurable via the Settings window (Config singleton).
     readonly property string fontFamily: Config.fontFamily
 
     PwObjectTracker {
         objects: [Pipewire.defaultAudioSink]
+    }
+
+    // Password-only QuickShell lock screen (WlSessionLock + PAM), trigger
+    // manually for now via: qs ipc call lock lock — see Lock.qml for status.
+    Lock {
+        bgColor: root.cBg
+        fgColor: root.cFg
+        accentColor: root.cAccent
+        borderColor: root.cBorder
+        dangerColor: root.cDanger
+        warnColor: root.cWarn
+        cornerRadius: theme.radius
+        fontFamily: root.fontFamily
     }
 
     // Spotlight-style launcher (single instance across all screens).
@@ -112,6 +126,145 @@ Scope {
                 fgColor: root.cFg
                 accentColor: root.cAccent
                 dangerColor: root.cDanger
+            }
+
+            Tooltip {
+                id: cpuTooltip
+                bar: bar
+                anchorItem: cpuArea
+                bgColor: root.cBg
+                borderColor: root.cBorder
+                fgColor: root.cFg
+                text: cpuProc.pct >= 0 ? "CPU " + cpuProc.pct + "%" : ""
+
+                Timer {
+                    interval: 2500
+                    running: cpuTooltip.open
+                    repeat: true
+                    triggeredOnStart: true
+                    onTriggered: if (!cpuProc.running)
+                        cpuProc.running = true
+                }
+                Process {
+                    id: cpuProc
+                    property int pct: -1
+                    property var perCore: []
+                    command: ["sh", "-c", "t1=$(mktemp); t2=$(mktemp); grep '^cpu' /proc/stat > \"$t1\"; sleep 0.3; grep '^cpu' /proc/stat > \"$t2\"; paste \"$t1\" \"$t2\" | awk '{ total1=$2+$3+$4+$5+$6+$7+$8+$9; idle1=$5+$6; total2=$11+$12+$13+$14+$15+$16+$17+$18; idle2=$14+$15; dt=total2-total1; di=idle2-idle1; pct=(dt>0)?int(100*(dt-di)/dt):0; print $1, pct }'; rm -f \"$t1\" \"$t2\""]
+                    stdout: StdioCollector {
+                        onStreamFinished: {
+                            const cores = [];
+                            let total = -1;
+                            const lines = this.text.trim().split("\n");
+                            for (const line of lines) {
+                                const parts = line.trim().split(/\s+/);
+                                if (parts.length < 2)
+                                    continue;
+                                const val = parseInt(parts[1], 10) || 0;
+                                if (parts[0] === "cpu")
+                                    total = val;
+                                else
+                                    cores.push(val);
+                            }
+                            cpuProc.pct = total;
+                            cpuProc.perCore = cores;
+                        }
+                    }
+                }
+
+                Grid {
+                    columns: Math.max(1, Math.ceil(Math.sqrt(cpuProc.perCore.length)))
+                    rowSpacing: 2
+                    columnSpacing: 10
+
+                    Repeater {
+                        model: cpuProc.perCore
+                        Text {
+                            width: 46
+                            color: root.cFg
+                            font.pixelSize: 11
+                            text: "C" + index + "  " + modelData + "%"
+                        }
+                    }
+                }
+            }
+
+            Tooltip {
+                id: wifiTooltip
+                bar: bar
+                anchorItem: netArea
+                bgColor: root.cBg
+                borderColor: root.cBorder
+                fgColor: root.cFg
+                text: wifiProc.ssid.length > 0 ? wifiProc.ssid + " (" + wifiProc.freqGhz + ")" : ""
+
+                Timer {
+                    interval: 2500
+                    running: wifiTooltip.open
+                    repeat: true
+                    triggeredOnStart: true
+                    onTriggered: if (!wifiProc.running)
+                        wifiProc.running = true
+                }
+                Process {
+                    id: wifiProc
+                    property string ssid: ""
+                    property string freqGhz: ""
+                    property string rateMbps: ""
+                    command: ["sh", "-c", "dev=$(ip -o route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i==\"dev\"){print $(i+1); exit}}'); if [ -z \"$dev\" ]; then for d in /sys/class/net/*/; do n=$(basename \"$d\"); [ \"$n\" = lo ] && continue; c=$(cat \"$d\"carrier 2>/dev/null); [ \"$c\" = 1 ] && { dev=$n; break; }; done; fi; if [ -z \"$dev\" ]; then echo off; exit; fi; if [ -d \"/sys/class/net/$dev/wireless\" ]; then info=$(iw dev \"$dev\" link 2>/dev/null); ssid=$(echo \"$info\" | awk -F': ' '/SSID:/{print $2; exit}'); freq=$(echo \"$info\" | awk '/freq:/{print $2; exit}'); rate=$(echo \"$info\" | awk '/rx bitrate:/{print $3; exit}'); echo \"wifi|$ssid|$freq|$rate\"; else echo \"ethernet|$dev\"; fi"]
+                    stdout: StdioCollector {
+                        onStreamFinished: {
+                            const t = this.text.trim();
+                            const parts = t.split("|");
+                            if (parts[0] === "wifi" && parts.length === 4) {
+                                wifiProc.ssid = parts[1];
+                                wifiProc.freqGhz = (parseFloat(parts[2]) / 1000).toFixed(1) + " GHz";
+                                wifiProc.rateMbps = Math.round(parseFloat(parts[3])) + " Mbps";
+                            } else {
+                                wifiProc.ssid = "";
+                                wifiProc.freqGhz = "";
+                                wifiProc.rateMbps = "";
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    visible: wifiProc.ssid.length > 0
+                    color: root.cFg
+                    font.pixelSize: 11
+                    text: "Up to " + wifiProc.rateMbps
+                }
+            }
+
+            Tooltip {
+                id: audioTooltip
+                bar: bar
+                anchorItem: audioArea
+                bgColor: root.cBg
+                borderColor: root.cBorder
+                fgColor: root.cFg
+
+                readonly property var sink: Pipewire.defaultAudioSink
+                readonly property string deviceLabel: {
+                    const s = sink;
+                    if (!s)
+                        return "";
+                    if (s.nickname && s.nickname.length > 0)
+                        return s.nickname;
+                    if (s.description && s.description.length > 0)
+                        return s.description;
+                    return s.name || "";
+                }
+                text: {
+                    const s = sink;
+                    if (!s || deviceLabel.length === 0)
+                        return "";
+                    if (!s.audio)
+                        return deviceLabel;
+                    if (s.audio.muted)
+                        return deviceLabel + " - muted";
+                    return deviceLabel + " at " + Math.round(s.audio.volume * 100) + "%";
+                }
             }
 
             // ───── LEFT: omarchy logo + workspaces ─────
@@ -695,8 +848,13 @@ Scope {
                     width: 12
                     height: 12
                     cursorShape: Qt.PointingHandCursor
+                    hoverEnabled: true
+                    property string mode: "off"
 
                     onClicked: LaunchTrigger.launch(["omarchy-launch-wifi"])
+                    onEntered: if (netArea.mode === "wifi")
+                        wifiTooltip.open = true
+                    onExited: wifiTooltip.open = false
 
                     Text {
                         id: netIcon
@@ -717,19 +875,22 @@ Scope {
                     }
                     Process {
                         id: netProc
-                        command: ["sh", "-c", "type=$(nmcli -t -f STATE,TYPE device 2>/dev/null | awk -F: '$1==\"connected\"{print $2; exit}'); case \"$type\" in wifi) sig=$(nmcli -t -f IN-USE,SIGNAL dev wifi 2>/dev/null | awk -F: '/^\\*/{print $2; exit}'); echo \"wifi:${sig:-0}\";; ethernet) echo ethernet;; *) echo off;; esac"]
+                        command: ["sh", "-c", "dev=$(ip -o route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i==\"dev\"){print $(i+1); exit}}'); if [ -z \"$dev\" ]; then for d in /sys/class/net/*/; do n=$(basename \"$d\"); [ \"$n\" = lo ] && continue; c=$(cat \"$d\"carrier 2>/dev/null); [ \"$c\" = 1 ] && { dev=$n; break; }; done; fi; if [ -z \"$dev\" ]; then echo off; exit; fi; if [ -d \"/sys/class/net/$dev/wireless\" ]; then sig=$(iw dev \"$dev\" link 2>/dev/null | awk '/signal:/{print $2; exit}'); if [ -z \"$sig\" ]; then echo off; else pct=$(( (sig + 100) * 2 )); [ \"$pct\" -lt 0 ] && pct=0; [ \"$pct\" -gt 100 ] && pct=100; echo \"wifi:$pct\"; fi; else echo ethernet; fi"]
                         stdout: StdioCollector {
                             onStreamFinished: {
                                 const t = this.text.trim();
                                 if (t === "ethernet") {
+                                    netArea.mode = "ethernet";
                                     netIcon.text = "󰀂";
                                     return;
                                 }
                                 if (t === "off" || t === "") {
+                                    netArea.mode = "off";
                                     netIcon.text = "󰤮";
                                     return;
                                 }
                                 if (t.indexOf("wifi:") === 0) {
+                                    netArea.mode = "wifi";
                                     const sig = parseInt(t.substring(5), 10) || 0;
                                     const icons = ["󰤯", "󰤟", "󰤢", "󰤥", "󰤨"];
                                     const idx = Math.min(4, Math.floor(sig / 20));
@@ -740,14 +901,15 @@ Scope {
                     }
                 }
 
-                // Audio (pulseaudio) — 󰋎 + vol%; left: audio manager, right: mute, scroll: volume
+                // Audio (pulseaudio) — icon only, tiered by level; left: audio manager, right: mute, scroll: volume
                 MouseArea {
                     id: audioArea
                     anchors.verticalCenter: parent.verticalCenter
-                    width: audioText.implicitWidth
+                    width: 12
                     height: 12
                     cursorShape: Qt.PointingHandCursor
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    hoverEnabled: true
 
                     onClicked: function (mouse) {
                         if (mouse.button === Qt.RightButton) {
@@ -765,21 +927,28 @@ Scope {
                         const step = wheel.angleDelta.y > 0 ? 0.05 : -0.05;
                         s.audio.volume = Math.max(0, Math.min(1, s.audio.volume + step));
                     }
+                    onEntered: audioTooltip.open = true
+                    onExited: audioTooltip.open = false
 
                     Text {
                         id: audioText
-                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.centerIn: parent
                         color: {
                             const s = Pipewire.defaultAudioSink;
                             return (s && s.audio && s.audio.muted) ? root.cDanger : root.cFg;
                         }
                         font.family: root.fontFamily
-                        font.pixelSize: 11
+                        font.pixelSize: 14
                         text: {
                             const s = Pipewire.defaultAudioSink;
-                            if (!s || !s.audio)
-                                return "󰋎 --";
-                            return "󰋎 " + Math.round(s.audio.volume * 100) + "%";
+                            if (!s || !s.audio || s.audio.muted)
+                                return "󰝟";
+                            const pct = s.audio.volume * 100;
+                            if (pct <= 33)
+                                return "󰕿";
+                            if (pct <= 66)
+                                return "󰖀";
+                            return "󰕾";
                         }
                     }
                 }
@@ -792,10 +961,13 @@ Scope {
                     height: 12
                     cursorShape: Qt.PointingHandCursor
                     acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    hoverEnabled: true
 
                     onClicked: function (mouse) {
                         LaunchTrigger.launch(mouse.button === Qt.RightButton ? ["alacritty"] : ["omarchy-launch-or-focus-tui", "btop"]);
                     }
+                    onEntered: cpuTooltip.open = true
+                    onExited: cpuTooltip.open = false
 
                     Text {
                         anchors.centerIn: parent
@@ -806,38 +978,14 @@ Scope {
                     }
                 }
 
-                // Battery — pct% + level icon; left: power menu, right: notify status
-                MouseArea {
-                    id: batteryArea
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: batteryText.implicitWidth
-                    height: 22
-                    cursorShape: Qt.PointingHandCursor
-                    acceptedButtons: Qt.LeftButton | Qt.RightButton
-                    visible: UPower.displayDevice && UPower.displayDevice.isPresent
-
-                    onClicked: function (mouse) {
-                        LaunchTrigger.launch(mouse.button === Qt.RightButton ? ["sh", "-c", "notify-send -u low \"$(omarchy-battery-status)\""] : ["omarchy-menu", "power"]);
-                    }
-
-                    Text {
-                        id: batteryText
-                        anchors.verticalCenter: parent.verticalCenter
-                        font.family: root.fontFamily
-                        font.pixelSize: 12
-                        property var dev: UPower.displayDevice
-                        property int pct: dev ? Math.round(dev.percentage) : 0
-                        color: pct <= 10 && UPower.onBattery ? root.cDanger : pct <= 20 && UPower.onBattery ? root.cWarn : root.cFg
-                        text: {
-                            if (!dev)
-                                return "";
-                            const dischargingIcons = ["󰁺", "󰁻", "󰁼", "󰁽", "󰁾", "󰁿", "󰂀", "󰂁", "󰂂", "󰁹"];
-                            const chargingIcons = ["󰢜", "󰂆", "󰂇", "󰂈", "󰢝", "󰂉", "󰢞", "󰂊", "󰂋", "󰂅"];
-                            const idx = Math.min(9, Math.max(0, Math.floor(pct / 10)));
-                            const icon = UPower.onBattery ? dischargingIcons[idx] : chargingIcons[idx];
-                            return pct + "% " + icon;
-                        }
-                    }
+                Battery {
+                    bar: bar
+                    fgColor: root.cFg
+                    bgColor: root.cBg
+                    borderColor: root.cBorder
+                    successColor: root.cSuccess
+                    warnColor: root.cWarn
+                    dangerColor: root.cDanger
                 }
             }
         }
